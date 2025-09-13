@@ -1,0 +1,90 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    @apply border-gray-200 dark:border-gray-700;
+  }
+  
+  body {
+    @apply bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+}
+
+@layer components {
+  .chat-message {
+    @apply rounded-lg;
+  }
+  
+  .earthgpt-brand {
+    @apply font-semibold;
+  }
+  
+  .earthgpt-brand .earth {
+    @apply text-earth-600 dark:text-earth-400;
+  }
+  
+  .earthgpt-brand .gpt {
+    color: #113ba6;
+  }
+  
+  .sidebar-item {
+    @apply flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors cursor-pointer;
+  }
+  
+  .sidebar-item.active {
+    @apply bg-earth-100 dark:bg-earth-900 text-earth-800 dark:text-earth-200;
+  }
+  
+  .input-field {
+    @apply w-full px-4 py-3 border border-gray-300/50 dark:border-gray-600/50 rounded-lg focus:ring-2 focus:ring-earth-500/50 focus:border-earth-500/50 bg-white/10 dark:bg-gray-800/10 backdrop-blur-md text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400;
+  }
+  
+  .btn-primary {
+    @apply bg-earth-600 hover:bg-earth-700 text-white px-6 py-2 rounded-lg font-medium transition-colors focus:ring-2 focus:ring-earth-500 focus:ring-offset-2;
+  }
+  
+  .btn-secondary {
+    @apply bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-900 dark:text-gray-100 px-4 py-2 rounded-lg font-medium transition-colors;
+  }
+  
+  .sustainability-badge {
+    @apply inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-earth-100 text-earth-800 dark:bg-earth-900 dark:text-earth-200;
+  }
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-gray-100 dark:bg-gray-800;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-gray-300 dark:bg-gray-600 rounded-full;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-gray-400 dark:bg-gray-500;
+}
+
+/* Loading animation */
+.typing-indicator {
+  @apply flex space-x-1;
+}
+
+.typing-indicator span {
+  @apply w-2 h-2 bg-gray-400 rounded-full animate-pulse;
+}
+
+.typing-indicator span:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.typing-indicator span:nth-child(3) {
+  animation-delay: 0.4s;
+}
