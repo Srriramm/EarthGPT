@@ -7,8 +7,8 @@ import {
   Sun,
   X
 } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { ChatSession } from '../types';
-import { formatDistanceToNow } from 'date-fns';
 
 interface SidebarProps {
   sessions: ChatSession[];
@@ -87,13 +87,18 @@ const Sidebar: React.FC<SidebarProps> = ({
 
         {/* New Chat Button */}
         <div className="p-4">
-          <button
+          <motion.button
             onClick={onNewChat}
             className="w-full flex items-center gap-3 px-4 py-3 bg-earth-600 hover:bg-earth-700 text-white rounded-lg font-medium transition-colors"
+            whileHover={{ scale: 1.01 }}
+            whileTap={{ scale: 0.99 }}
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.3 }}
           >
             <Plus className="w-5 h-5" />
             New Chat
-          </button>
+          </motion.button>
         </div>
 
         {/* Chat Sessions */}
@@ -110,39 +115,46 @@ const Sidebar: React.FC<SidebarProps> = ({
                 </p>
               </div>
             ) : (
-              sessions.map((session) => (
-                <div
-                  key={session.id}
-                  className={`
-                    group relative flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-colors
-                    ${currentSession?.id === session.id 
-                      ? 'bg-earth-100 dark:bg-earth-900 text-earth-800 dark:text-earth-200' 
-                      : 'hover:bg-gray-100 dark:hover:bg-gray-800'
-                    }
-                  `}
-                  onClick={() => onSelectSession(session)}
-                >
-                  <MessageSquare className="w-4 h-4 flex-shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium truncate">
-                      {truncateTitle(session.title)}
-                    </p>
-                    <p className="text-xs text-gray-500 dark:text-gray-400">
-                      {formatDistanceToNow(new Date(session.lastActivity), { addSuffix: true })}
-                    </p>
-                  </div>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onDeleteSession(session.id);
-                    }}
-                    className="opacity-0 group-hover:opacity-100 p-1 hover:bg-red-100 dark:hover:bg-red-900 rounded transition-all"
-                    aria-label="Delete session"
+              <AnimatePresence>
+                {sessions.map((session, index) => (
+                  <motion.div
+                    key={session.id}
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                    transition={{ duration: 0.2, delay: index * 0.05 }}
+                    className={`
+                      group relative flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-all duration-200
+                      ${currentSession?.id === session.id 
+                        ? 'bg-earth-100 dark:bg-earth-900 text-earth-800 dark:text-earth-200 shadow-sm' 
+                        : 'hover:bg-gray-100 dark:hover:bg-gray-800 hover:shadow-sm'
+                      }
+                    `}
+                    onClick={() => onSelectSession(session)}
+                    whileHover={{ scale: 1.01 }}
+                    whileTap={{ scale: 0.99 }}
                   >
-                    <Trash2 className="w-4 h-4 text-red-500" />
-                  </button>
-                </div>
-              ))
+                    <MessageSquare className="w-4 h-4 flex-shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">
+                        {truncateTitle(session.title)}
+                      </p>
+                    </div>
+                    <motion.button
+                      initial={{ opacity: 0 }}
+                      whileHover={{ opacity: 1 }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onDeleteSession(session.id);
+                      }}
+                      className="opacity-0 group-hover:opacity-100 p-1 hover:bg-red-100 dark:hover:bg-red-900 rounded transition-all"
+                      aria-label="Delete session"
+                    >
+                      <Trash2 className="w-4 h-4 text-red-500" />
+                    </motion.button>
+                  </motion.div>
+                ))}
+              </AnimatePresence>
             )}
           </div>
         </div>

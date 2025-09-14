@@ -26,18 +26,17 @@ const ChatInput: React.FC<ChatInputProps> = ({
     }
   }, [message]);
 
-  // Check for non-sustainability keywords
+  // Check for obviously non-sustainability keywords (only the most obvious ones)
   const checkForNonSustainability = (text: string) => {
-    const nonSustainabilityKeywords = [
-      'weather', 'cooking', 'recipe', 'movie', 'music', 'sports', 'football',
-      'basketball', 'soccer', 'gaming', 'video game', 'dating', 'relationship',
-      'fashion', 'shopping', 'travel', 'vacation', 'health', 'medical', 'doctor',
-      'finance', 'investment', 'stock', 'trading', 'programming', 'coding',
-      'homework', 'math', 'school', 'university'
+    const obviousNonSustainabilityKeywords = [
+      'poker', 'gambling', 'casino', 'betting', 'cards',
+      'dating', 'relationship', 'love', 'marriage',
+      'gaming', 'video game', 'playstation', 'xbox',
+      'movie', 'film', 'celebrity', 'entertainment'
     ];
     
     const textLower = text.toLowerCase();
-    return nonSustainabilityKeywords.some(keyword => textLower.includes(keyword));
+    return obviousNonSustainabilityKeywords.some(keyword => textLower.includes(keyword));
   };
 
   const handleSubmit = (e: React.FormEvent) => {

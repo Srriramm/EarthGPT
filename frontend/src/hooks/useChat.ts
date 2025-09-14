@@ -96,6 +96,7 @@ export const useChat = () => {
       };
 
       setSessions(prev => [newSession, ...prev]);
+      // Switch to new session with smooth transition
       setCurrentSession(newSession);
       return newSession;
     } catch (error) {
@@ -111,6 +112,7 @@ export const useChat = () => {
       };
 
       setSessions(prev => [newSession, ...prev]);
+      // Switch to new session with smooth transition
       setCurrentSession(newSession);
       return newSession;
     }

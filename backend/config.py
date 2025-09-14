@@ -15,13 +15,15 @@ class Settings(BaseSettings):
     
     # Claude API Configuration
     claude_api_key: str = Field(default="", alias="ANTHROPIC_API_KEY")
-    claude_model: str = "claude-sonnet-4-20250514"
-    max_tokens: int = 2048
+    claude_model: str = "claude-3-5-haiku-20241022"
+    max_tokens: int = 4096
     temperature: float = 0.7
     
-    # Database Configuration
-    database_url: str = "postgresql://user:password@localhost:5432/sustainability_db"
-    redis_url: str = "redis://localhost:6379"
+    # Database Configuration (MongoDB only)
+    
+    # MongoDB Configuration
+    mongodb_url: str = "mongodb://localhost:27017"
+    mongodb_database: str = "earthgpt"
     
     # Vector Database Configuration
     chroma_persist_directory: str = "./chroma_db"
@@ -37,6 +39,7 @@ class Settings(BaseSettings):
     # Security
     secret_key: str = "your-secret-key-change-in-production"
     access_token_expire_minutes: int = 30
+    algorithm: str = "HS256"
     
     # Logging
     log_level: str = "INFO"
@@ -44,7 +47,7 @@ class Settings(BaseSettings):
     
     # Memory Configuration
     max_conversation_history: int = 10
-    max_context_tokens: int = 4000
+    max_context_tokens: int = 8000
     
     # Guardrails Configuration
     enable_guardrails: bool = True
@@ -79,6 +82,7 @@ class Settings(BaseSettings):
         "energy transition", "decarbonization", "decarbonisation", "net zero", "carbon neutral",
         "carbon negative", "renewable energy", "clean technology", "green technology",
         "energy storage", "battery technology", "smart grid", "microgrid", "energy security",
+        "blockchain", "digital technology", "traceability", "transparency",
         
         # Sustainability frameworks
         "triple bottom line", "people planet profit", "stakeholder capitalism", 
@@ -98,6 +102,7 @@ class Settings(BaseSettings):
         "green building", "leed", "breeam", "passive house", "green infrastructure",
         "urban planning", "sustainable cities", "smart cities", "public transport",
         "electric vehicle", "ev", "sustainable mobility", "active transport",
+        "supply chain", "supply chains", "logistics", "procurement", "sourcing",
         
         # Organizations and bodies
         "unep", "iea", "irena", "world bank", "green climate fund", "gef",

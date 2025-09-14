@@ -15,20 +15,22 @@ class SustainabilityGuardrails:
             keyword.lower() for keyword in settings.sustainability_keywords
         )
         self.negative_patterns = [
-            r'\b(?:politics|political)\b',
-            r'\b(?:sports|football|basketball|soccer)\b',
-            r'\b(?:entertainment|movie|music|celebrity)\b',
-            r'\b(?:cooking|recipe|food)\b',
-            r'\b(?:dating|relationship|love)\b',
-            r'\b(?:gaming|video game|playstation|xbox)\b',
-            r'\b(?:fashion|clothing|shopping)\b',
-            r'\b(?:travel|vacation|tourism)\b',
-            r'\b(?:health|medical|doctor|medicine)\b',
+            r'\b(?:politics|political)\b(?!\s+(?:climate|environmental|sustainability|green))',
+            r'\b(?:sports|football|basketball|soccer|tennis|golf|baseball)\b',
+            r'\b(?:entertainment|movie|music|celebrity|actor|actress|film|tv|television)\b',
+            r'\b(?:cooking|recipe|food|restaurant|chef)\b(?!\s+(?:sustainable|organic|local|farm|eco))',
+            r'\b(?:dating|relationship|love|marriage|romance)\b',
+            r'\b(?:gaming|video game|playstation|xbox|nintendo|steam)\b',
+            r'\b(?:fashion|clothing|shopping|retail)\b(?!\s+(?:sustainable|eco|green|ethical))',
+            r'\b(?:travel|vacation|tourism|hotel)\b(?!\s+(?:sustainable|eco|green|responsible))',
+            r'\b(?:health|medical|doctor|medicine|hospital|pharmacy)\b(?!\s+(?:environmental|sustainability))',
             # More specific finance patterns that exclude sustainability-related finance
-            r'\b(?:stock market|day trading|forex|cryptocurrency|bitcoin|ethereum)\b',
-            r'\b(?:personal finance|retirement planning|tax advice|insurance)\b',
-            r'\b(?:technology|programming|coding|software)\b',
-            r'\b(?:education|school|university|student)\b',
+            r'\b(?:stock market|day trading|forex|cryptocurrency|bitcoin|ethereum|trading)\b(?!\s+(?:sustainable|esg|green))',
+            r'\b(?:personal finance|retirement planning|tax advice|insurance)\b(?!\s+(?:sustainable|green|esg))',
+            r'\b(?:technology|programming|coding|software|computer|ai|artificial intelligence)\b(?!\s+(?:sustainable|green|clean|environmental))',
+            r'\b(?:education|school|university|student|college)\b(?!\s+(?:environmental|sustainability|green))',
+            r'\b(?:weather|forecast|temperature)\b(?!\s+(?:climate|global|warming|change))',
+            r'\b(?:news|current events|breaking news)\b(?!\s+(?:climate|environmental|sustainability))',
         ]
         
         # Compile regex patterns for efficiency
@@ -40,7 +42,7 @@ class SustainabilityGuardrails:
     
     def check_sustainability_relevance(self, query: str) -> GuardrailCheck:
         """
-        Check if the query is sustainability-related.
+        Check if the query is sustainability-related with strict validation.
         
         Args:
             query: User input query
@@ -50,15 +52,47 @@ class SustainabilityGuardrails:
         """
         query_lower = query.lower()
         
-        # Allow follow-up phrases that are context-dependent
+        # STRICT: Check for obvious non-sustainability topics first
+        strict_negative_patterns = [
+            r'\b(?:poker|gambling|casino|betting|cards|poker strategy|poker game)\b',
+            r'\b(?:sports|football|basketball|soccer|tennis|golf|baseball|cricket)\b',
+            r'\b(?:movie|film|music|celebrity|actor|actress|entertainment)\b',
+            r'\b(?:cooking|recipe|restaurant|chef|food)\b(?!\s+(?:sustainable|organic|local|eco))',
+            r'\b(?:dating|relationship|love|marriage|romance)\b',
+            r'\b(?:gaming|video game|playstation|xbox|nintendo|steam)\b',
+            r'\b(?:fashion|clothing|shopping|retail)\b(?!\s+(?:sustainable|eco|green|ethical))',
+            r'\b(?:travel|vacation|tourism|hotel)\b(?!\s+(?:sustainable|eco|green|responsible))',
+            r'\b(?:health|medical|doctor|medicine|hospital|pharmacy)\b(?!\s+(?:environmental|sustainability))',
+            r'\b(?:stock market|day trading|forex|cryptocurrency|bitcoin|ethereum|trading)\b(?!\s+(?:sustainable|esg|green))',
+            r'\b(?:personal finance|retirement planning|tax advice|insurance)\b(?!\s+(?:sustainable|green|esg))',
+            r'\b(?:programming|coding|software|computer|ai|artificial intelligence)\b(?!\s+(?:sustainable|green|clean|environmental))',
+            r'\b(?:education|school|university|student|college)\b(?!\s+(?:environmental|sustainability|green))',
+            r'\b(?:weather|forecast|temperature)\b(?!\s+(?:climate|global|warming|change))',
+            r'\b(?:news|current events|breaking news)\b(?!\s+(?:climate|environmental|sustainability))',
+            r'\b(?:winning|strategy|success|profit|business)\b(?!\s+(?:sustainable|green|environmental|climate))',
+        ]
+        
+        # Check for strict negative patterns
+        for pattern in strict_negative_patterns:
+            if re.search(pattern, query_lower):
+                return GuardrailCheck(
+                    is_sustainability_related=False,
+                    confidence_score=0.0,
+                    detected_keywords=[],
+                    rejection_reason=f"Query appears to be about non-sustainability topics"
+                )
+        
+        # Allow follow-up phrases ONLY if they're very short and context-dependent
         follow_up_phrases = [
             "explain more", "more details", "tell me more", "elaborate",
             "can you tell more", "can you explain more", "can you elaborate",
             "yes", "y", "yeah", "yep", "sure", "ok", "okay",
-            "what else", "anything else", "more information"
+            "what else", "anything else", "more information", "continue",
+            "go on", "keep going", "more", "please"
         ]
         
-        if any(phrase in query_lower for phrase in follow_up_phrases):
+        # Check for simple follow-up responses (only if very short)
+        if len(query.strip()) <= 10 and any(phrase in query_lower for phrase in follow_up_phrases):
             return GuardrailCheck(
                 is_sustainability_related=True,
                 confidence_score=0.8,
@@ -66,7 +100,7 @@ class SustainabilityGuardrails:
                 rejection_reason=None
             )
         
-        # Check for negative patterns first
+        # Check for negative patterns
         for pattern in self.negative_regex:
             if pattern.search(query):
                 return GuardrailCheck(
@@ -76,7 +110,7 @@ class SustainabilityGuardrails:
                     rejection_reason=f"Query appears to be about non-sustainability topics"
                 )
         
-        # Check for sustainability keywords
+        # STRICT: Require explicit sustainability keywords or contextual sustainability
         detected_keywords = []
         keyword_matches = 0
         
@@ -86,11 +120,11 @@ class SustainabilityGuardrails:
                 keyword_matches += 1
         
         # Calculate confidence score
-        confidence_score = min(keyword_matches / 3.0, 1.0)  # Normalize to 0-1
+        confidence_score = min(keyword_matches / 2.0, 1.0)  # More strict: require 2 keywords for high confidence
         
-        # Determine if query is sustainability-related
+        # STRICT: Only allow if we have clear sustainability indicators
         is_sustainability_related = (
-            keyword_matches > 0 or 
+            keyword_matches >= 1 or  # At least one sustainability keyword
             self._check_contextual_sustainability(query_lower)
         )
         
@@ -238,11 +272,62 @@ class SustainabilityGuardrails:
             r'\b(?:i cannot|i can\'t|i\'m not able to)\s+(?:help|assist)',
             r'\b(?:sorry, i don\'t|i don\'t know about)',
             r'\b(?:that\'s not my area|outside my expertise)',
+            r'\b(?:i\'m not qualified|i don\'t have expertise)',
+            r'\b(?:i can\'t answer|i cannot answer)',
         ]
         
         for pattern in inappropriate_patterns:
             if re.search(pattern, response_lower):
                 return False, "Response contains inappropriate refusal patterns"
+        
+        # STRICT: Check for off-topic content in response
+        off_topic_in_response = [
+            r'\b(?:poker|gambling|casino|betting|cards|poker strategy)\b',
+            r'\b(?:sports|football|basketball|soccer|tennis|golf)\b',
+            r'\b(?:movie|film|music|celebrity|actor|actress)\b',
+            r'\b(?:cooking|recipe|restaurant|chef)\b(?!\s+(?:sustainable|organic|local))',
+            r'\b(?:dating|relationship|love|marriage)\b',
+            r'\b(?:gaming|video game|playstation|xbox)\b',
+            r'\b(?:fashion|clothing|shopping)\b(?!\s+(?:sustainable|eco|green))',
+            r'\b(?:travel|vacation|tourism)\b(?!\s+(?:sustainable|eco|green))',
+            r'\b(?:health|medical|doctor|medicine)\b(?!\s+(?:environmental|sustainability))',
+            r'\b(?:stock market|day trading|forex|cryptocurrency)\b(?!\s+(?:sustainable|esg|green))',
+            r'\b(?:programming|coding|software|computer)\b(?!\s+(?:sustainable|green|clean))',
+            r'\b(?:winning|strategy|success|profit)\b(?!\s+(?:sustainable|green|environmental|climate))',
+        ]
+        
+        for pattern in off_topic_in_response:
+            if re.search(pattern, response_lower):
+                return False, "Response contains off-topic content"
+        
+        # Check for non-sustainability topics in response (only if they dominate the response)
+        non_sustainability_patterns = [
+            r'\b(?:sports|football|basketball|soccer|tennis|golf)\b',
+            r'\b(?:movie|film|music|celebrity|actor|actress)\b',
+            r'\b(?:cooking|recipe|restaurant|chef)\b(?!\s+(?:sustainable|organic|local))',
+            r'\b(?:dating|relationship|love|marriage)\b',
+            r'\b(?:gaming|video game|playstation|xbox)\b',
+            r'\b(?:fashion|clothing|shopping)\b(?!\s+(?:sustainable|eco|green))',
+            r'\b(?:travel|vacation|tourism)\b(?!\s+(?:sustainable|eco|green))',
+            r'\b(?:health|medical|doctor|medicine)\b(?!\s+(?:environmental|sustainability))',
+            r'\b(?:stock market|day trading|forex|cryptocurrency)\b(?!\s+(?:sustainable|esg|green))',
+            r'\b(?:programming|coding|software|computer)\b(?!\s+(?:sustainable|green|clean))',
+        ]
+        
+        # Count non-sustainability mentions vs sustainability mentions
+        non_sustainability_mentions = 0
+        for pattern in non_sustainability_patterns:
+            if re.search(pattern, response_lower):
+                non_sustainability_mentions += 1
+        
+        # Only reject if non-sustainability topics dominate and there are no sustainability keywords
+        if non_sustainability_mentions > 0:
+            sustainability_mentions = sum(
+                1 for keyword in self.sustainability_keywords 
+                if keyword in response_lower
+            )
+            if sustainability_mentions == 0:
+                return False, "Response contains non-sustainability topics"
         
         # Check for sustainability relevance in response
         sustainability_mentions = sum(
@@ -250,8 +335,19 @@ class SustainabilityGuardrails:
             if keyword in response_lower
         )
         
-        if sustainability_mentions == 0 and len(response) > 100:
+        # For longer responses, require sustainability context
+        if len(response) > 100 and sustainability_mentions == 0:
             return False, "Response lacks sustainability context"
+        
+        # Check if response is too generic or off-topic
+        generic_patterns = [
+            r'\b(?:i understand|that\'s interesting|good question)\b.*(?:but|however).*(?:not my area|outside my expertise)',
+            r'\b(?:i\'m sorry|apologize).*(?:can\'t help|not able to assist)',
+        ]
+        
+        for pattern in generic_patterns:
+            if re.search(pattern, response_lower):
+                return False, "Response contains generic off-topic patterns"
         
         return True, None
     

@@ -5,7 +5,6 @@ import {
   ChevronDown
 } from 'lucide-react';
 import { Message } from '../types';
-import { format } from 'date-fns';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -62,14 +61,9 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
   if (isUser) {
     // User message layout (right-aligned, content-based width)
     return (
-      <div className="chat-message user mb-6 w-full flex justify-end">
-        <div className="inline-block max-w-4xl p-4 bg-earth-100 dark:bg-earth-900 rounded-lg">
-          {/* Header */}
-          <div className="flex items-center gap-2 mb-2 justify-end">
-            <span className="text-xs text-gray-500 dark:text-gray-400">
-              {format(new Date(message.timestamp), 'HH:mm')}
-            </span>
-          </div>
+      <div className="chat-message user mb-6 w-full flex flex-col items-end">
+        {/* Message Bubble */}
+        <div className="inline-block max-w-2xl p-3 bg-earth-100 dark:bg-earth-900 rounded-lg">
 
           {/* Message Text */}
           <div className="prose prose-sm max-w-none dark:prose-invert text-gray-900 dark:text-gray-100 text-justify">
@@ -80,46 +74,42 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
               {message.content}
             </ReactMarkdown>
           </div>
-
-          {/* Action Buttons */}
-          <div className="flex items-center gap-2 mt-3 justify-end">
-            <button
-              onClick={handleCopy}
-              className="flex items-center gap-1 px-2 py-1 text-xs text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
-            >
-              {copied ? (
-                <>
-                  <Check className="w-3 h-3" />
-                  Copied
-                </>
-              ) : (
-                <>
-                  <Copy className="w-3 h-3" />
-                  Copy
-                </>
-              )}
-            </button>
-          </div>
         </div>
+        
+        {/* Copy Button - Right below the message box */}
+        <button
+          onClick={handleCopy}
+          className="flex items-center gap-1 px-2 py-1 text-xs text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors mt-1"
+        >
+          {copied ? (
+            <>
+              <Check className="w-3 h-3" />
+              Copied
+            </>
+          ) : (
+            <>
+              <Copy className="w-3 h-3" />
+              Copy
+            </>
+          )}
+        </button>
       </div>
     );
   }
 
   // Assistant message layout (left-aligned, content-based width)
   return (
-    <div className="chat-message assistant mb-6 w-full flex justify-start">
-      <div className="inline-block max-w-5xl p-4 bg-gray-100 dark:bg-gray-800 rounded-lg">
+    <div className="chat-message assistant mb-6 w-full flex flex-col items-start">
+      {/* Message Bubble */}
+      <div className="inline-block max-w-3xl p-3 bg-blue-100 dark:bg-blue-900 rounded-lg">
           {/* Header */}
-          <div className="flex items-center gap-2 mb-2">
-            <span className="text-xs text-gray-500 dark:text-gray-400">
-              {format(new Date(message.timestamp), 'HH:mm')}
-            </span>
-            {isSummary && (
+          {isSummary && (
+            <div className="flex items-center gap-2 mb-2">
               <span className="sustainability-badge">
                 Summary
               </span>
-            )}
-          </div>
+            </div>
+          )}
 
           {/* Message Text */}
           <div className="prose prose-sm max-w-none dark:prose-invert text-gray-900 dark:text-gray-100 text-justify">
@@ -130,38 +120,37 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
               {message.content}
             </ReactMarkdown>
           </div>
+      </div>
 
-          {/* Action Buttons */}
-          <div className="flex items-center gap-2 mt-3 justify-start">
-            <button
-              onClick={handleCopy}
-              className="flex items-center gap-1 px-2 py-1 text-xs text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
-            >
-              {copied ? (
-                <>
-                  <Check className="w-3 h-3" />
-                  Copied
-                </>
-              ) : (
-                <>
-                  <Copy className="w-3 h-3" />
-                  Copy
-                </>
-              )}
-            </button>
+      {/* Action Buttons - Below the message box */}
+      <div className="flex items-center gap-2 mt-1">
+        <button
+          onClick={handleCopy}
+          className="flex items-center gap-1 px-2 py-1 text-xs text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
+        >
+          {copied ? (
+            <>
+              <Check className="w-3 h-3" />
+              Copied
+            </>
+          ) : (
+            <>
+              <Copy className="w-3 h-3" />
+              Copy
+            </>
+          )}
+        </button>
 
-            {isSummary && canRequestDetailed && onRequestDetailed && (
-              <button
-                onClick={onRequestDetailed}
-                className="flex items-center gap-1 px-3 py-1 text-xs bg-earth-100 hover:bg-earth-200 dark:bg-earth-900 dark:hover:bg-earth-800 text-earth-800 dark:text-earth-200 rounded-full transition-colors"
-              >
-                <ChevronDown className="w-3 h-3" />
-                Get Detailed Explanation
-              </button>
-            )}
-          </div>
-
-        </div>
+        {isSummary && canRequestDetailed && onRequestDetailed && (
+          <button
+            onClick={onRequestDetailed}
+            className="flex items-center gap-1 px-3 py-1 text-xs bg-earth-100 hover:bg-earth-200 dark:bg-earth-900 dark:hover:bg-earth-800 text-earth-800 dark:text-earth-200 rounded-full transition-colors"
+          >
+            <ChevronDown className="w-3 h-3" />
+            Get Detailed Explanation
+          </button>
+        )}
+      </div>
     </div>
   );
 };

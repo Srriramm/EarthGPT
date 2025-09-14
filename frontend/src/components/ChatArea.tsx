@@ -34,7 +34,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   }, [messages, isLoading]);
 
   return (
-    <div className="flex-1 overflow-y-auto py-6 space-y-4 w-full px-2">
+    <div className="h-full overflow-y-auto py-6 space-y-4 w-full px-2">
       {/* Welcome Message */}
       {messages.length === 0 && !isLoading && (
         <motion.div

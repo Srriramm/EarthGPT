@@ -4,22 +4,26 @@ from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
 from fastapi.responses import JSONResponse
 from typing import List, Dict, Any
 from datetime import datetime
-import uuid
+import re
 from loguru import logger
 
 from models.schemas import (
     ConversationRequest, ConversationResponse, SessionInfo, 
-    HealthResponse, ErrorResponse, Message, MessageRole
+    HealthResponse, ErrorResponse, Message, MessageRole,
+    ConversationRequestWithUser, ConversationResponseWithUser
 )
-from core.guardrails import SustainabilityGuardrails
+from core.intelligent_guardrails import IntelligentGuardrails
 from core.pinecone_memory import PineconeMemoryManager
 from core.complex_questions import ComplexQuestionHandler
 from core.prompt_engineering import PromptManager
 from services.llm_service import llm_service
+from auth.dependencies import get_current_active_user, get_optional_current_user
+from models.schemas import User
+from models.user import chat_session_model
 from config import settings
 
 # Initialize components
-guardrails = SustainabilityGuardrails()
+guardrails = IntelligentGuardrails()
 memory_manager = PineconeMemoryManager()
 complex_handler = ComplexQuestionHandler()
 prompt_manager = PromptManager()
@@ -36,7 +40,7 @@ async def chat(request: ConversationRequest, background_tasks: BackgroundTasks):
     try:
         # Generate session ID if not provided
         if not request.session_id:
-            session_id = memory_manager.create_session()
+            session_id = memory_manager.create_session("default")
         else:
             session_id = request.session_id
             # Ensure session exists by checking if we can get session info
@@ -52,7 +56,7 @@ async def chat(request: ConversationRequest, background_tasks: BackgroundTasks):
         
         logger.info(f"Processing chat request for session: {session_id}")
         
-        # Step 1: Guardrail check
+        # Step 1: STRICT Guardrail check
         guardrail_result = guardrails.check_sustainability_relevance(request.message)
         
         if not guardrail_result.is_sustainability_related:
@@ -75,10 +79,11 @@ async def chat(request: ConversationRequest, background_tasks: BackgroundTasks):
                 guardrail_reason=guardrail_result.rejection_reason
             )
         
+        
         # Step 2: Get context from memory system
         context = memory_manager.get_context_for_query(session_id, request.message)
         
-        # Step 3: Use query classifier to determine if detailed response is needed
+        # Step 3: Use query classifier to determine response length
         # Get conversation history for classification
         conversation_history = []
         if hasattr(context, 'conversation_history') and context.conversation_history:
@@ -93,24 +98,10 @@ async def chat(request: ConversationRequest, background_tasks: BackgroundTasks):
         is_detailed_request = (
             request.request_detailed or 
             response_length == ResponseLength.DETAILED or
-            ("explain" in request.message.lower()) or  # Any "explain" query should be detailed
-            ("elaborate" in request.message.lower() and len(conversation_history) > 0) or
-            ("example" in request.message.lower())  # Queries asking for examples should be detailed
+            _is_elaboration_request(request.message, conversation_history)
         )
         
-        # Only use old simple question detection for very basic definitions
-        is_simple_question = (
-            "which of the following" in request.message.lower() or
-            ("what is" in request.message.lower() and len(request.message.split()) <= 5) or
-            ("define" in request.message.lower() and len(request.message.split()) <= 4) or
-            ("what does" in request.message.lower() and "mean" in request.message.lower() and len(request.message.split()) <= 6)
-        )
-        
-        # Always use LLM service for full responses - disable complex_handler summary generation
-        is_summary = False
-        can_request_detailed = False
-        
-        # Step 4: Generate full response using LLM
+        # Step 4: Generate response using LLM with appropriate length
         is_detailed = is_detailed_request
         messages = prompt_manager.create_conversation_prompt(
             request.message, 
@@ -130,7 +121,7 @@ async def chat(request: ConversationRequest, background_tasks: BackgroundTasks):
             response_text = "I apologize, but I need to provide a more focused response on sustainability topics. Could you please rephrase your question with more specific sustainability context?"
         
         # Step 6: Add messages to conversation history
-        from datetime import datetime, timedelta
+        from datetime import timedelta
         
         # Create user message with current timestamp
         user_timestamp = datetime.utcnow()
@@ -143,8 +134,8 @@ async def chat(request: ConversationRequest, background_tasks: BackgroundTasks):
         logger.info(f"User message timestamp: {user_timestamp.isoformat()}")
         logger.info(f"Assistant message timestamp: {assistant_timestamp.isoformat()}")
         
-        memory_manager.add_message(session_id, user_message)
-        memory_manager.add_message(session_id, assistant_message)
+        memory_manager.add_message(session_id, user_message, "default")
+        memory_manager.add_message(session_id, assistant_message, "default")
         
         # Step 7: Log the interaction
         background_tasks.add_task(
@@ -178,6 +169,177 @@ async def health_check():
         guardrails_enabled=settings.enable_guardrails,
         memory_system_active=True
     )
+
+
+@router.post("/chat/authenticated", response_model=ConversationResponseWithUser)
+async def chat_authenticated(
+    request: ConversationRequestWithUser, 
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    Authenticated chat endpoint for sustainability conversations with user context.
+    """
+    try:
+        # Generate session ID if not provided
+        if not request.session_id:
+            session_id = memory_manager.create_session(current_user.id)
+        else:
+            session_id = request.session_id
+            # Verify session belongs to user
+            session = await chat_session_model.get_session_by_id(session_id, current_user.id)
+            if not session:
+                # Create new session if it doesn't exist or doesn't belong to user
+                session_id = memory_manager.create_session(current_user.id)
+            else:
+                # Update session activity
+                await chat_session_model.update_session_activity(session_id, current_user.id)
+        
+        logger.info(f"Processing authenticated chat request for user {current_user.id}, session: {session_id}")
+        
+        # Step 1: STRICT Guardrail check
+        guardrail_result = guardrails.check_sustainability_relevance(request.message)
+        
+        if not guardrail_result.is_sustainability_related:
+            # Log the rejection
+            background_tasks.add_task(
+                log_interaction_authenticated,
+                user_id=current_user.id,
+                session_id=session_id,
+                query=request.message,
+                response="",
+                guardrail_triggered=True,
+                guardrail_reason=guardrail_result.rejection_reason
+            )
+            
+            return ConversationResponseWithUser(
+                response=guardrails.get_polite_refusal_message(guardrail_result.rejection_reason),
+                session_id=session_id,
+                user_id=current_user.id,
+                is_summary=False,
+                can_request_detailed=False,
+                guardrail_triggered=True,
+                guardrail_reason=guardrail_result.rejection_reason
+            )
+        
+        # Step 2: Query classification and response length determination
+        from core.query_classifier import QueryClassifier
+        classifier = QueryClassifier()
+        classification = classifier.classify_query(request.message)
+        
+        # Check for elaboration requests
+        is_detailed_request = classification.response_length.value == "detailed"
+        if not is_detailed_request and _is_elaboration_request(request.message):
+            is_detailed_request = True
+        
+        # Step 3: Memory retrieval
+        memory_context = memory_manager.get_context_for_query(
+            session_id=session_id,
+            query=request.message,
+            user_id=current_user.id
+        )
+        
+        # Step 4: Complex question handling
+        if classification.is_complex:
+            complex_response = complex_handler.handle_complex_question(
+                query=request.message,
+                context=memory_context,
+                classification=classification
+            )
+            
+            if complex_response:
+                # Store the interaction
+                user_message = Message(role=MessageRole.USER, content=request.message)
+                assistant_message = Message(role=MessageRole.ASSISTANT, content=complex_response)
+                
+                memory_manager.add_message(session_id, user_message, current_user.id)
+                memory_manager.add_message(session_id, assistant_message, current_user.id)
+                
+                # Log the interaction
+                background_tasks.add_task(
+                    log_interaction_authenticated,
+                    user_id=current_user.id,
+                    session_id=session_id,
+                    query=request.message,
+                    response=complex_response,
+                    guardrail_triggered=False
+                )
+                
+                return ConversationResponseWithUser(
+                    response=complex_response,
+                    session_id=session_id,
+                    user_id=current_user.id,
+                    is_summary=classification.response_length.value == "short",
+                    can_request_detailed=classification.response_length.value == "short",
+                    guardrail_triggered=False
+                )
+        
+        # Step 5: LLM generation
+        response_guidelines = classifier.get_response_guidelines(classification)
+        
+        # Generate response using LLM service
+        llm_response = await llm_service.generate_response(
+            query=request.message,
+            context=memory_context,
+            is_detailed=is_detailed_request,
+            response_guidelines=response_guidelines,
+            conversation_history=memory_context.conversation_history
+        )
+        
+        # Step 6: Output validation
+        if not guardrails.validate_output(llm_response, request.message):
+            # Return generic refusal if output validation fails
+            refusal_message = "I apologize, but I can only provide information related to sustainability topics. How can I help you with environmental, climate, or sustainability questions?"
+            
+            background_tasks.add_task(
+                log_interaction_authenticated,
+                user_id=current_user.id,
+                session_id=session_id,
+                query=request.message,
+                response=refusal_message,
+                guardrail_triggered=True,
+                guardrail_reason="Output validation failed"
+            )
+            
+            return ConversationResponseWithUser(
+                response=refusal_message,
+                session_id=session_id,
+                user_id=current_user.id,
+                is_summary=False,
+                can_request_detailed=False,
+                guardrail_triggered=True,
+                guardrail_reason="Output validation failed"
+            )
+        
+        # Step 7: Store interaction in memory
+        user_message = Message(role=MessageRole.USER, content=request.message)
+        assistant_message = Message(role=MessageRole.ASSISTANT, content=llm_response)
+        
+        memory_manager.add_message(session_id, user_message, current_user.id)
+        memory_manager.add_message(session_id, assistant_message, current_user.id)
+        
+        # Step 8: Log interaction
+        background_tasks.add_task(
+            log_interaction_authenticated,
+            user_id=current_user.id,
+            session_id=session_id,
+            query=request.message,
+            response=llm_response,
+            guardrail_triggered=False
+        )
+        
+        return ConversationResponseWithUser(
+            response=llm_response,
+            session_id=session_id,
+            user_id=current_user.id,
+            is_summary=classification.response_length.value == "short",
+            can_request_detailed=classification.response_length.value == "short",
+            guardrail_triggered=False
+        )
+        
+    except Exception as e:
+        logger.error(f"Error in authenticated chat: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/sessions/{session_id}", response_model=SessionInfo)
@@ -260,6 +422,39 @@ async def get_system_stats():
     }
 
 
+def _is_elaboration_request(query: str, conversation_history: List[str]) -> bool:
+    """Check if the query is asking for elaboration on a previous topic."""
+    query_lower = query.lower().strip()
+    
+    # Direct elaboration requests
+    elaboration_patterns = [
+        r'\b(?:explain|elaborate|detail|comprehensive|thorough|in-depth|extensive)\b.*\b(?:detail|depth|more)\b',
+        r'\bexplain\s+(?:me\s+)?(?:that\s+)?in\s+detail\b',
+        r'\bcan\s+you\s+elaborate\b',
+        r'\btell\s+me\s+more\s+about\b',
+        r'\bprovide\s+(?:a\s+)?(?:detailed|comprehensive|thorough)\b',
+        r'\bgive\s+me\s+(?:a\s+)?(?:detailed|comprehensive|full)\b',
+        r'\bbreak\s+down\b',
+        r'\bcomprehensive\s+(?:analysis|explanation|overview)\b',
+        r'\byes\s+explain\s+(?:that\s+)?(?:in\s+)?detail',
+        r'\belaborate\s+(?:on\s+)?(?:that|it)\b',
+        r'\bmore\s+detailed?\s+(?:information|explanation)\b',
+        r'\bgo\s+into\s+(?:more\s+)?detail\b'
+    ]
+    
+    for pattern in elaboration_patterns:
+        if re.search(pattern, query_lower):
+            return True
+    
+    # Simple affirmative responses that might be follow-ups
+    simple_affirmatives = ['yes', 'yeah', 'sure', 'ok', 'okay', 'yep']
+    words = query_lower.strip().split()
+    if len(words) <= 2 and words[0].lower() in simple_affirmatives and conversation_history:
+        return True
+    
+    return False
+
+
 async def log_interaction(
     session_id: str,
     query: str,
@@ -287,6 +482,34 @@ async def log_interaction(
         
     except Exception as e:
         logger.error(f"Error logging interaction: {e}")
+
+
+async def log_interaction_authenticated(
+    user_id: str,
+    session_id: str,
+    query: str,
+    response: str,
+    guardrail_triggered: bool,
+    guardrail_reason: str = None
+):
+    """Background task to log authenticated interactions."""
+    try:
+        log_data = {
+            "timestamp": datetime.utcnow().isoformat(),
+            "user_id": user_id,
+            "session_id": session_id,
+            "query": query,
+            "response": response,
+            "guardrail_triggered": guardrail_triggered,
+            "guardrail_reason": guardrail_reason,
+            "query_length": len(query),
+            "response_length": len(response)
+        }
+        
+        logger.info(f"Authenticated interaction logged: {log_data}")
+        
+    except Exception as e:
+        logger.error(f"Failed to log authenticated interaction: {e}")
 
 
 # Error handlers will be added to the main FastAPI app in main.py

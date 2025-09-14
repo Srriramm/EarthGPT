@@ -133,7 +133,7 @@ class QueryClassifier:
             logger.debug("Classified as follow-up question")
             return QueryType.FOLLOW_UP, ResponseLength.MEDIUM
         
-        # Check for simple definitions
+        # Check for simple definitions - these should be SHORT by default
         if self._is_simple_definition(query_lower):
             logger.debug("Classified as simple definition")
             return QueryType.SIMPLE_DEFINITION, ResponseLength.SHORT
@@ -158,7 +158,7 @@ class QueryClassifier:
             logger.debug("Classified as complex explanation")
             return QueryType.COMPLEX_EXPLANATION, ResponseLength.MEDIUM
         
-        # Default to simple explanation
+        # Default to SHORT for most queries - users can ask for elaboration
         logger.debug("Classified as simple explanation")
         return QueryType.SIMPLE_DEFINITION, ResponseLength.SHORT
 
@@ -242,14 +242,14 @@ class QueryClassifier:
             guidelines.update({
                 "style": "concise and direct",
                 "structure": "1-2 sentences with key definition or concept",
-                "ending": "I can provide more detailed information about [topic] if you would like to explore this further."
+                "ending": "Would you like me to elaborate on this topic in more detail?"
             })
         
         elif response_length == ResponseLength.MEDIUM:
             guidelines.update({
                 "style": "informative but accessible",
                 "structure": "1-2 paragraphs with main points and examples",
-                "ending": "Would you like me to elaborate on any specific aspect of [topic]?"
+                "ending": "Would you like me to elaborate on any specific aspect of this topic?"
             })
         
         elif response_length == ResponseLength.DETAILED:

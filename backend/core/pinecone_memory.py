@@ -47,7 +47,7 @@ class PineconeConversationMemory:
         
         logger.info("Pinecone conversation memory initialized")
     
-    def create_session(self, user_id: str = "default") -> str:
+    def create_session(self, user_id: str) -> str:
         """Create a new conversation session."""
         session_id = str(uuid.uuid4())
         self.session_metadata[session_id] = {
@@ -56,10 +56,10 @@ class PineconeConversationMemory:
             "message_count": 0,
             "user_id": user_id
         }
-        logger.info(f"Created new session: {session_id}")
+        logger.info(f"Created new session for user {user_id}: {session_id}")
         return session_id
     
-    def add_message(self, session_id: str, message: Message, user_id: str = "default") -> None:
+    def add_message(self, session_id: str, message: Message, user_id: str) -> None:
         """Add a message to the conversation history in Pinecone."""
         if session_id not in self.session_metadata:
             logger.warning(f"Session {session_id} not found, creating new one")
@@ -272,7 +272,7 @@ class PineconeMemoryManager:
     def __init__(self):
         self.conversation_memory = PineconeConversationMemory()
         # Keep the existing RAG system for knowledge base
-        from core.memory import SustainabilityRAG
+        from core.rag_system import SustainabilityRAG
         self.rag_system = SustainabilityRAG()
         logger.info("Pinecone memory manager initialized")
     
@@ -319,7 +319,7 @@ class PineconeMemoryManager:
         """Create a new conversation session."""
         return self.conversation_memory.create_session(user_id)
     
-    def add_message(self, session_id: str, message: Message, user_id: str = "default") -> None:
+    def add_message(self, session_id: str, message: Message, user_id: str) -> None:
         """Add a message to conversation history."""
         self.conversation_memory.add_message(session_id, message, user_id)
     

@@ -11,8 +11,10 @@ from loguru import logger
 import uvicorn
 
 from api.routes import router
+from api.auth_routes import router as auth_router
 from services.llm_service import llm_service
-from core.memory import MemoryManager
+from core.pinecone_memory import PineconeMemoryManager
+from database.mongodb import mongodb
 from config import settings
 
 
@@ -41,6 +43,15 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info("Starting Sustainability Assistant API...")
     
+    # Connect to MongoDB
+    try:
+        await mongodb.connect()
+        logger.info("Connected to MongoDB")
+    except Exception as e:
+        logger.error(f"Failed to connect to MongoDB: {e}")
+        # In production, you might want to exit here
+        # sys.exit(1)
+    
     # Initialize LLM service
     if not llm_service.load_model():
         logger.error("Failed to load LLM model")
@@ -48,7 +59,7 @@ async def lifespan(app: FastAPI):
         # sys.exit(1)
     
     # Initialize memory manager
-    memory_manager = MemoryManager()
+    memory_manager = PineconeMemoryManager()
     logger.info("Memory manager initialized")
     
     # Clean up old sessions on startup
@@ -60,6 +71,10 @@ async def lifespan(app: FastAPI):
     
     # Shutdown
     logger.info("Shutting down Sustainability Assistant API...")
+    
+    # Disconnect from MongoDB
+    await mongodb.disconnect()
+    logger.info("Disconnected from MongoDB")
 
 
 # Create FastAPI application
@@ -81,6 +96,7 @@ app.add_middleware(
 
 # Include API routes
 app.include_router(router)
+app.include_router(auth_router)
 
 
 # Error handlers
