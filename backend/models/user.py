@@ -196,7 +196,7 @@ class ChatSessionModel:
         result = await collection.insert_one(session_doc)
         
         return ChatSession(
-            id=str(result.inserted_id),
+            id=session_doc["session_id"],  # Use session_id instead of MongoDB _id
             user_id=session_doc["user_id"],
             title=session_doc["title"],
             created_at=session_doc["created_at"],
@@ -204,6 +204,28 @@ class ChatSessionModel:
             message_count=session_doc["message_count"],
             is_active=session_doc["is_active"]
         )
+    
+    async def update_session_title(self, session_id: str, user_id: str, new_title: str) -> bool:
+        """Update the title of a chat session."""
+        collection = await self.get_collection()
+        
+        result = await collection.update_one(
+            {"session_id": session_id, "user_id": user_id},
+            {"$set": {"title": new_title, "last_activity": datetime.utcnow()}}
+        )
+        
+        return result.modified_count > 0
+    
+    async def update_session_activity(self, session_id: str, user_id: str) -> bool:
+        """Update the last_activity timestamp of a chat session."""
+        collection = await self.get_collection()
+        
+        result = await collection.update_one(
+            {"session_id": session_id, "user_id": user_id},
+            {"$set": {"last_activity": datetime.utcnow()}}
+        )
+        
+        return result.modified_count > 0
     
     async def get_user_sessions(self, user_id: str, limit: int = 50) -> List[ChatSession]:
         """Get all sessions for a user."""
@@ -216,7 +238,7 @@ class ChatSessionModel:
         sessions = []
         async for doc in cursor:
             sessions.append(ChatSession(
-                id=str(doc["_id"]),
+                id=doc["session_id"],  # Use session_id instead of MongoDB _id
                 user_id=doc["user_id"],
                 title=doc["title"],
                 created_at=doc["created_at"],
@@ -230,16 +252,30 @@ class ChatSessionModel:
     async def get_session_by_id(self, session_id: str, user_id: str) -> Optional[ChatSession]:
         """Get a specific session by ID."""
         collection = await self.get_collection()
+        
+        # Try to find by session_id first (new format)
         doc = await collection.find_one({
             "session_id": session_id,
             "user_id": user_id
         })
         
+        # If not found, try to find by MongoDB _id (old format for backward compatibility)
+        if not doc:
+            try:
+                from bson import ObjectId
+                doc = await collection.find_one({
+                    "_id": ObjectId(session_id),
+                    "user_id": user_id
+                })
+            except:
+                # If ObjectId conversion fails, session_id is not a valid MongoDB ObjectId
+                pass
+        
         if not doc:
             return None
         
         return ChatSession(
-            id=str(doc["_id"]),
+            id=doc["session_id"],  # Always return session_id as the ID
             user_id=doc["user_id"],
             title=doc["title"],
             created_at=doc["created_at"],
@@ -249,28 +285,86 @@ class ChatSessionModel:
         )
     
     async def update_session_activity(self, session_id: str, user_id: str):
-        """Update session last activity and increment message count."""
+        """Update session last activity only (message count is handled by smart memory)."""
         collection = await self.get_collection()
-        await collection.update_one(
+        
+        # Try to update by session_id first (new format)
+        result = await collection.update_one(
             {"session_id": session_id, "user_id": user_id},
             {
-                "$set": {"last_activity": datetime.utcnow()},
-                "$inc": {"message_count": 1}
+                "$set": {"last_activity": datetime.utcnow()}
             }
         )
+        
+        # If not found, try to update by MongoDB _id (old format for backward compatibility)
+        if result.matched_count == 0:
+            try:
+                from bson import ObjectId
+                await collection.update_one(
+                    {"_id": ObjectId(session_id), "user_id": user_id},
+                    {
+                        "$set": {"last_activity": datetime.utcnow()}
+                    }
+                )
+            except:
+                # If ObjectId conversion fails, session_id is not a valid MongoDB ObjectId
+                pass
+    
+    async def sync_message_count(self, session_id: str, user_id: str, message_count: int):
+        """Sync the message count from smart memory to MongoDB session."""
+        collection = await self.get_collection()
+        
+        # Try to update by session_id first (new format)
+        result = await collection.update_one(
+            {"session_id": session_id, "user_id": user_id},
+            {
+                "$set": {"message_count": message_count}
+            }
+        )
+        
+        # If not found, try to update by MongoDB _id (old format for backward compatibility)
+        if result.matched_count == 0:
+            try:
+                from bson import ObjectId
+                await collection.update_one(
+                    {"_id": ObjectId(session_id), "user_id": user_id},
+                    {
+                        "$set": {"message_count": message_count}
+                    }
+                )
+            except:
+                # If ObjectId conversion fails, session_id is not a valid MongoDB ObjectId
+                pass
     
     async def delete_session(self, session_id: str, user_id: str) -> bool:
         """Delete a session (soft delete by setting is_active to False)."""
         collection = await self.get_collection()
+        
+        # Try to find and update by session_id first (new format)
         result = await collection.update_one(
             {"session_id": session_id, "user_id": user_id},
             {"$set": {"is_active": False}}
         )
+        
+        # If not found, try to find by MongoDB _id (old format for backward compatibility)
+        if result.matched_count == 0:
+            try:
+                from bson import ObjectId
+                result = await collection.update_one(
+                    {"_id": ObjectId(session_id), "user_id": user_id},
+                    {"$set": {"is_active": False}}
+                )
+            except:
+                # If ObjectId conversion fails, session_id is not a valid MongoDB ObjectId
+                pass
+        
         return result.modified_count > 0
 
 
 # Global instances
 user_model = UserModel()
 chat_session_model = ChatSessionModel()
+
+
 
 

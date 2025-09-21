@@ -13,7 +13,7 @@ import uvicorn
 from api.routes import router
 from api.auth_routes import router as auth_router
 from services.llm_service import llm_service
-from core.pinecone_memory import PineconeMemoryManager
+from core.summarization_llm import summarization_llm_service
 from database.mongodb import mongodb
 from config import settings
 
@@ -52,18 +52,19 @@ async def lifespan(app: FastAPI):
         # In production, you might want to exit here
         # sys.exit(1)
     
-    # Initialize LLM service
+    # Initialize LLM services
     if not llm_service.load_model():
-        logger.error("Failed to load LLM model")
+        logger.error("Failed to load main LLM model")
         # In production, you might want to exit here
         # sys.exit(1)
     
-    # Initialize memory manager
-    memory_manager = PineconeMemoryManager()
-    logger.info("Memory manager initialized")
+    if not summarization_llm_service.load_model():
+        logger.error("Failed to load summarization LLM model")
+        # In production, you might want to exit here
+        # sys.exit(1)
     
-    # Clean up old sessions on startup
-    memory_manager.cleanup_old_sessions(hours=24)
+    # Memory managers are initialized in routes.py
+    logger.info("Memory managers initialized")
     
     logger.info("Sustainability Assistant API started successfully")
     
@@ -142,12 +143,11 @@ async def root():
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
     """Log all requests."""
-    start_time = logger.bind().info("Request started")
+    logger.info(f"Request started: {request.method} {request.url.path}")
     
     response = await call_next(request)
     
-    process_time = logger.bind().info("Request completed")
-    logger.info(f"{request.method} {request.url.path} - {response.status_code}")
+    logger.info(f"Request completed: {request.method} {request.url.path} - {response.status_code}")
     
     return response
 

@@ -52,7 +52,7 @@ class MongoDB:
             await sessions_collection.create_index("session_id", unique=True)
             
             # Messages collection indexes
-            messages_collection = self.database.messages
+            messages_collection = self.database.chat_messages
             await messages_collection.create_index([("user_id", 1), ("session_id", 1), ("timestamp", -1)])
             
             logger.info("Database indexes created successfully")

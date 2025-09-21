@@ -236,3 +236,27 @@ class ComplexQuestionHandler:
         else:
             # Regular response (will be handled by main LLM)
             return "", False, False
+    
+    def handle_complex_question(self, query: str, context: Dict[str, Any], classification: Tuple = None) -> str:
+        """
+        Handle complex questions with progressive summarization.
+        
+        Args:
+            query: User query
+            context: Retrieved context and conversation history
+            classification: Query classification tuple (for compatibility)
+            
+        Returns:
+            Response string or None if not a complex question
+        """
+        # Detect if question is complex
+        is_complex, complexity_score, indicators = self.detector.is_complex_question(query)
+        
+        if is_complex:
+            # Generate summary response
+            summary_response = self.summarizer.generate_summary(query, context)
+            logger.info(f"Generated summary for complex question (complexity: {complexity_score:.2f})")
+            return summary_response
+        else:
+            # Not a complex question, return None to let main LLM handle it
+            return None

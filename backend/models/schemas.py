@@ -55,6 +55,8 @@ class HealthResponse(BaseModel):
     model_loaded: bool
     guardrails_enabled: bool
     memory_system_active: bool
+    
+    model_config = {"protected_namespaces": ()}
 
 
 class GuardrailCheck(BaseModel):
@@ -150,7 +152,7 @@ class ConversationRequestWithUser(BaseModel):
     message: str = Field(..., min_length=1, max_length=2000)
     session_id: Optional[str] = None
     request_detailed: bool = False
-    user_id: str  # Added user context
+    # user_id is not needed here since we get it from the authenticated user
 
 
 class ConversationResponseWithUser(BaseModel):

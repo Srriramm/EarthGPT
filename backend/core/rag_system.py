@@ -88,3 +88,6 @@ class SustainabilityRAG:
             logger.error(f"Error retrieving relevant context: {e}")
             return []
 
+
+
+

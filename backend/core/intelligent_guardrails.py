@@ -21,10 +21,16 @@ class IntelligentGuardrails:
             'environment': 0.8, 'environmental': 0.8, 'climate': 0.8, 'sustainability': 0.9, 'sustainable': 0.9,
             'green': 0.7, 'eco': 0.7, 'carbon': 0.8, 'emission': 0.8, 'renewable': 0.9, 'clean energy': 0.9,
             'biodiversity': 0.8, 'conservation': 0.8, 'pollution': 0.7, 'waste': 0.7, 'recycling': 0.7,
-            'esg': 0.8, 'circular economy': 0.8, 'net zero': 0.8, 'carbon neutral': 0.8,
+            'esg': 0.8, 'circular economy': 0.8, 'circular': 0.6, 'net zero': 0.8, 'carbon neutral': 0.8,
             # Energy and power systems
             'solar': 0.8, 'wind': 0.8, 'hydro': 0.8, 'geothermal': 0.8, 'fossil fuel': 0.6, 'coal': 0.6, 'oil': 0.6,
-            'energy security': 0.7, 'power': 0.5, 'electricity': 0.5, 'grid': 0.5,
+            'energy security': 0.7, 'energy efficiency': 0.8, 'energy transition': 0.8, 'energy storage': 0.7,
+            'power': 0.5, 'electricity': 0.5, 'grid': 0.5,
+            # Finance and investment
+            'green finance': 0.8, 'green bonds': 0.8, 'sustainable finance': 0.8, 'climate finance': 0.8,
+            # Infrastructure and technology
+            'green infrastructure': 0.8, 'sustainable agriculture': 0.8, 'green building': 0.8,
+            'sustainable transport': 0.8, 'clean technology': 0.8, 'green technology': 0.8,
             # Environmental protection
             'air pollution': 0.8, 'greenhouse gas': 0.8, 'global warming': 0.8, 'climate change': 0.9,
             'public health': 0.6, 'health': 0.4, 'quality of life': 0.5,
@@ -56,6 +62,8 @@ class IntelligentGuardrails:
             'cooking': -1.0, 'recipe': -1.0, 'restaurant': -1.0, 'chef': -1.0, 'food': -0.8,
             'dating': -1.2, 'relationship': -1.0, 'love': -1.2, 'marriage': -1.0, 'romance': -1.2,
             'gaming': -1.2, 'video game': -1.2, 'playstation': -1.2, 'xbox': -1.2, 'nintendo': -1.2,
+            'chess': -1.2, 'checkers': -1.2, 'bridge': -1.2, 'monopoly': -1.2, 'scrabble': -1.2,
+            'board game': -1.2, 'card game': -1.2, 'player': -0.8, 'champion': -0.8, 'tournament': -0.8,
             'fashion': -1.0, 'clothing': -0.8, 'shopping': -0.8, 'retail': -0.8, 'style': -0.8,
             'travel': -1.0, 'vacation': -1.0, 'tourism': -1.0, 'hotel': -1.0, 'trip': -1.0,
             'health': -1.0, 'medical': -1.0, 'doctor': -1.0, 'medicine': -1.0, 'hospital': -1.0,
@@ -66,7 +74,22 @@ class IntelligentGuardrails:
             'winning': -0.8, 'strategy': -0.6, 'success': -0.6, 'profit': -0.6, 'business': -0.6,
             'diet': -1.0, 'nutrition': -1.0, 'bodybuilding': -1.2, 'muscle': -1.0, 'fitness': -1.0,
             'workout': -1.0, 'exercise': -1.0, 'gym': -1.0, 'training': -1.0, 'weight': -0.8,
-            'protein': -0.8, 'calories': -0.8, 'macros': -0.8, 'supplements': -0.8
+            'protein': -0.8, 'calories': -0.8, 'macros': -0.8, 'supplements': -0.8,
+            # Physics and motion-related terms
+            'physics': -1.2, 'physical': -0.8, 'motion': -1.0, 'velocity': -1.0, 'acceleration': -1.0,
+            'force': -0.8, 'momentum': -1.0, 'kinetic': -1.0, 'potential': -0.8,
+            'tangential': -1.2, 'linear': -1.0, 'rotational': -1.0, 'oscillatory': -1.0,
+            'harmonic': -1.0, 'wave': -0.8, 'frequency': -0.8, 'amplitude': -0.8, 'mechanics': -1.0,
+            'thermodynamics': -1.0, 'electromagnetism': -1.0, 'quantum': -1.0, 'relativity': -1.0,
+            'particle': -0.8, 'atom': -0.8, 'molecule': -0.8, 'newton': -1.0, 'einstein': -1.0,
+            'maxwell': -1.0, 'schrodinger': -1.0, 'heisenberg': -1.0, 'planck': -1.0, 'bohr': -1.0,
+            # Mathematical and philosophical topics
+            'mathematics': -1.2, 'math': -1.2, 'mathematical': -1.2, 'philosophy': -1.2, 'philosophical': -1.2,
+            'paradox': -1.2, 'achilles': -1.2, 'tortoise': -1.2, 'zeno': -1.2, 'cantor': -1.2,
+            'diagonal': -1.2, 'argument': -1.0, 'set theory': -1.2, 'infinity': -1.0, 'infinite': -1.0,
+            'cardinality': -1.2, 'geometry': -1.0, 'algebra': -1.0, 'calculus': -1.0, 'statistics': -1.0,
+            'probability': -1.0, 'theorem': -1.0, 'proof': -1.0, 'logic': -1.0, 'logical': -1.0,
+            'reasoning': -1.0, 'deduction': -1.0, 'induction': -1.0, 'syllogism': -1.0
         }
         
         # Business/finance context (neutral unless sustainability-related)
@@ -78,12 +101,13 @@ class IntelligentGuardrails:
         
         logger.info(f"Intelligent guardrails initialized with {len(self.sustainability_concepts)} sustainability concepts")
     
-    def check_sustainability_relevance(self, query: str) -> GuardrailCheck:
+    def check_sustainability_relevance(self, query: str, conversation_context: str = None) -> GuardrailCheck:
         """
         Check if the query is sustainability-related using intelligent semantic analysis.
         
         Args:
             query: User input query
+            conversation_context: Previous conversation context for follow-up detection
             
         Returns:
             GuardrailCheck with validation results
@@ -98,6 +122,9 @@ class IntelligentGuardrails:
             r'\b(?:cooking|recipe|restaurant|chef)\b.*\b(?:best|how to|tips)\b(?!\s+(?:sustainable|organic|local))',
             r'\b(?:dating|relationship|love|marriage)\b.*\b(?:advice|tips|how to)\b',
             r'\b(?:gaming|video game|playstation|xbox)\b.*\b(?:strategy|tips|winning)\b',
+            r'\b(?:chess|checkers|poker|bridge|monopoly|scrabble|board game|card game)\b.*\b(?:best|player|champion|strategy|tips|winning)\b',
+            r'\b(?:chess|checkers|poker|bridge|monopoly|scrabble|board game|card game)\b',
+            r'\b(?:best|top|greatest|world|champion|player)\b.*\b(?:chess|checkers|poker|bridge|monopoly|scrabble|board game|card game)\b',
             r'\b(?:fashion|clothing|shopping)\b.*\b(?:best|style|trends)\b(?!\s+(?:sustainable|eco|green))',
             r'\b(?:travel|vacation|tourism)\b.*\b(?:best|recommend|guide)\b(?!\s+(?:sustainable|eco|green))',
             r'\b(?:health|medical|doctor|medicine)\b.*\b(?:advice|tips|treatment)\b(?!\s+(?:environmental|sustainability))',
@@ -106,12 +133,24 @@ class IntelligentGuardrails:
             r'\b(?:education|school|university|student)\b.*\b(?:advice|tips|study)\b(?!\s+(?:environmental|sustainability|green))',
             # NEW: Block bodybuilding, fitness, diet questions
             r'\b(?:diet|nutrition|bodybuilding|muscle|fitness|workout|exercise|gym|training)\b.*\b(?:plan|strategy|tips|advice|how to)\b(?!\s+(?:sustainable|environmental|eco))',
+            # Block mathematical, philosophical, and physics topics
+            r'\b(?:mathematics|math|mathematical|philosophy|philosophical|paradox|achilles|tortoise|zeno)\b',
+            r'\b(?:cantor|diagonal|argument|set theory|infinity|infinite|cardinality)\b',
+            r'\b(?:geometry|algebra|calculus|statistics|probability|theorem|proof)\b',
+            r'\b(?:logic|logical|reasoning|deduction|induction|syllogism)\b',
+            # Block physics and motion-related topics
+            r'\b(?:physics|physical|motion|velocity|acceleration|force|momentum|kinetic|potential)\b(?!\s+(?:sustainable|renewable|clean|green|environmental|efficiency|transition|storage|security))',
+            r'\b(?:tangential|circular|linear|rotational|oscillatory|harmonic|wave|frequency|amplitude)\b',
+            r'\b(?:mechanics|thermodynamics|electromagnetism|quantum|relativity|particle|atom|molecule)\b',
+            r'\b(?:newton|einstein|maxwell|schrodinger|heisenberg|planck|bohr|rutherford)\b',
             r'\b(?:bodybuilding|muscle|fitness|workout|exercise|gym|training)\b.*\b(?:sustainable|diet|nutrition)\b(?!\s+(?:environmental|eco|green))',
             r'\b(?:sustainable|diet|nutrition)\b.*\b(?:bodybuilding|muscle|fitness|workout|exercise|gym|training)\b(?!\s+(?:environmental|eco|green))',
         ]
         
         for pattern in immediate_block_patterns:
             if re.search(pattern, query_lower):
+                logger.info(f"Guardrails: BLOCKED query '{query[:50]}...' - matched pattern: {pattern}")
+                logger.info(f"Guardrails: Query lower: '{query_lower}'")
                 return GuardrailCheck(
                     is_sustainability_related=False,
                     confidence_score=0.0,
@@ -125,17 +164,52 @@ class IntelligentGuardrails:
             "can you tell more", "can you explain more", "can you elaborate",
             "yes", "y", "yeah", "yep", "sure", "ok", "okay",
             "what else", "anything else", "more information", "continue",
-            "go on", "keep going", "more", "please", "summarize", "summary"
+            "go on", "keep going", "more", "please", "summarize", "summary",
+            "can you", "could you", "would you", "please elaborate", "please explain",
+            "tell me", "show me", "give me", "provide", "expand", "detail"
         ]
         
-        # Check for simple follow-up responses (only if very short)
-        if len(query.strip()) <= 10 and any(phrase in query_lower for phrase in follow_up_phrases):
-            return GuardrailCheck(
-                is_sustainability_related=True,
-                confidence_score=0.8,
-                detected_keywords=["follow-up"],
-                rejection_reason=None
-            )
+        # Check for follow-up responses with context awareness
+        is_follow_up = any(phrase in query_lower for phrase in follow_up_phrases)
+        
+        if is_follow_up:
+            # If we have conversation context and it contains sustainability content, allow the follow-up
+            if conversation_context:
+                context_lower = conversation_context.lower()
+                context_sustainability_score = self._calculate_semantic_sustainability_score(context_lower)
+                
+                # If the conversation context is sustainability-related, allow the follow-up
+                if context_sustainability_score >= 0.3:
+                    return GuardrailCheck(
+                        is_sustainability_related=True,
+                        confidence_score=0.9,
+                        detected_keywords=["follow-up", "context-aware"],
+                        rejection_reason=None
+                    )
+            
+            # For follow-ups (short or medium length), allow them ONLY if conversation context is sustainability-related
+            # This handles cases like "Can you elaborate" (17 chars) which should be allowed
+            if conversation_context and len(query.strip()) <= 30:
+                context_lower = conversation_context.lower()
+                context_sustainability_score = self._calculate_semantic_sustainability_score(context_lower)
+                
+                # Only allow if the conversation context is actually sustainability-related
+                if context_sustainability_score >= 0.2:  # Lower threshold for follow-ups
+                    return GuardrailCheck(
+                        is_sustainability_related=True,
+                        confidence_score=0.8,
+                        detected_keywords=["follow-up", "context-aware"],
+                        rejection_reason=None
+                    )
+            
+            # For very short follow-ups without context, allow them (original behavior)
+            if len(query.strip()) <= 10:
+                return GuardrailCheck(
+                    is_sustainability_related=True,
+                    confidence_score=0.8,
+                    detected_keywords=["follow-up"],
+                    rejection_reason=None
+                )
         
         # Check for content requests with substantial content (likely legitimate sustainability content)
         content_request_phrases = ["summarize", "summary", "explain", "tell me about", "what is", "how does"]
@@ -158,15 +232,20 @@ class IntelligentGuardrails:
         # Calculate confidence score based on both semantic analysis and keywords
         confidence_score = max(sustainability_score, min(keyword_matches / 2.0, 1.0))
         
-        # INTELLIGENT: Allow if we have clear sustainability indicators
+        # Debug logging
+        logger.info(f"Guardrails: Query '{query[:50]}...' - sustainability_score: {sustainability_score:.2f}, keyword_matches: {keyword_matches}, confidence_score: {confidence_score:.2f}")
+        
+        # INTELLIGENT: Allow if we have clear sustainability indicators - be more lenient
         is_sustainability_related = (
-            sustainability_score >= 0.3 or  # Moderate semantic sustainability score
-            (keyword_matches >= 2) or  # At least TWO sustainability keywords
-            (keyword_matches >= 1 and sustainability_score >= 0.2) or  # One keyword + moderate semantic score
-            (keyword_matches >= 1 and len(query_lower) > 100)  # One keyword + substantial content (likely legitimate)
+            sustainability_score >= 0.2 or  # Lower semantic sustainability score threshold
+            (keyword_matches >= 1) or  # At least ONE sustainability keyword
+            (keyword_matches >= 1 and sustainability_score >= 0.1) or  # One keyword + low semantic score
+            (keyword_matches >= 1 and len(query_lower) > 50) or  # One keyword + moderate content
+            (sustainability_score >= 0.1 and len(query_lower) > 100)  # Low semantic score + substantial content
         )
         
         if not is_sustainability_related:
+            logger.info(f"Guardrails: BLOCKED query '{query[:50]}...' - semantic score: {confidence_score:.2f}")
             return GuardrailCheck(
                 is_sustainability_related=False,
                 confidence_score=confidence_score,
@@ -174,6 +253,7 @@ class IntelligentGuardrails:
                 rejection_reason="Query does not appear to be related to sustainability topics"
             )
         
+        logger.info(f"Guardrails: ALLOWED query '{query[:50]}...' - semantic score: {confidence_score:.2f}")
         return GuardrailCheck(
             is_sustainability_related=True,
             confidence_score=confidence_score,

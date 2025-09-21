@@ -100,7 +100,27 @@ class QueryClassifier:
             r'^\s*sure\s+',
             r'\bthat\s+in\s+detail\b',
             r'\bit\s+in\s+detail\b',
-            r'\belaborate\s+(?:on\s+)?(?:that|it)\s*$'
+            r'\belaborate\s+(?:on\s+)?(?:that|it)\s*$',
+            r'^\s*elaborate\s*$',
+            r'^\s*elaborate\s+it\s*$',
+            r'^\s*tell\s+me\s+more\s*$',
+            r'^\s*explain\s+more\s*$',
+            r'^\s*can\s+you\s+elaborate\s*$',
+            r'^\s*could\s+you\s+elaborate\s*$',
+            r'^\s*please\s+elaborate\s*$'
+        ]
+        
+        # Patterns for user-provided detailed content
+        self.user_detailed_content_patterns = [
+            r'here\'s\s+(?:a\s+)?(?:comprehensive|detailed|thorough)',
+            r'comprehensive\s+(?:exploration|analysis|overview)',
+            r'core\s+advantages?:',
+            r'technical\s+implementation',
+            r'practical\s+example',
+            r'additional\s+benefits?:',
+            r'potential\s+challenges?:',
+            r'emerging\s+(?:real-world\s+)?applications?:',
+            r'would\s+you\s+be\s+interested\s+in\s+exploring'
         ]
 
     def classify_query(self, query: str, conversation_history: List[str] = None) -> Tuple[QueryType, ResponseLength]:
@@ -118,6 +138,11 @@ class QueryClassifier:
         conversation_context = ' '.join(conversation_history or []).lower()
         
         logger.debug(f"Classifying query: {query[:50]}...")
+        
+        # Check if user is providing detailed content themselves
+        if self._is_user_detailed_content(query_lower):
+            logger.debug("Classified as user-provided detailed content")
+            return QueryType.COMPLEX_EXPLANATION, ResponseLength.MEDIUM
         
         # Check for explicit detailed requests
         if self._is_detailed_request(query_lower):
@@ -228,6 +253,25 @@ class QueryClassifier:
             return True
                 
         return False
+    
+    def _is_user_detailed_content(self, query: str) -> bool:
+        """Check if user is providing detailed content themselves."""
+        for pattern in self.user_detailed_content_patterns:
+            if re.search(pattern, query, re.IGNORECASE):
+                return True
+        
+        # Check for structured content indicators
+        structured_indicators = [
+            'core advantages', 'technical implementation', 'practical example',
+            'additional benefits', 'potential challenges', 'emerging applications',
+            'comprehensive exploration', 'detailed analysis'
+        ]
+        
+        for indicator in structured_indicators:
+            if indicator in query:
+                return True
+                
+        return False
 
     def get_response_guidelines(self, query_type: QueryType, response_length: ResponseLength) -> Dict[str, str]:
         """Get response guidelines based on classification."""
@@ -242,21 +286,21 @@ class QueryClassifier:
             guidelines.update({
                 "style": "concise and direct",
                 "structure": "1-2 sentences with key definition or concept",
-                "ending": "Would you like me to elaborate on this topic in more detail?"
+                "ending": "End naturally or with a specific contextual follow-up if relevant"
             })
         
         elif response_length == ResponseLength.MEDIUM:
             guidelines.update({
                 "style": "informative but accessible",
                 "structure": "1-2 paragraphs with main points and examples",
-                "ending": "Would you like me to elaborate on any specific aspect of this topic?"
+                "ending": "End naturally or with specific contextual follow-up suggestions if there are genuinely interesting aspects to explore"
             })
         
         elif response_length == ResponseLength.DETAILED:
             guidelines.update({
-                "style": "comprehensive and educational",
-                "structure": "Multiple paragraphs with sections, examples, and implementation details",
-                "ending": "I can provide more specific information about any particular aspect that interests you."
+                "style": "comprehensive and educational, but natural and conversational",
+                "structure": "Thorough explanation in whatever format best serves the content - may include headings, bullet points, or flowing paragraphs as appropriate",
+                "ending": "End naturally when topic is fully covered, or with specific contextual follow-up suggestions if there are genuinely interesting related aspects"
             })
         
         return guidelines

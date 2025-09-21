@@ -53,7 +53,7 @@ class Settings(BaseSettings):
     enable_guardrails: bool = True
     sustainability_keywords: List[str] = [
         # Core sustainability terms
-        "climate", "esg", "renewable", "carbon", "sustainability", "environment", "green",
+        "climate", "esg", "renewable", "carbon", "sustainability", "sustainable", "environment", "green",
         "clean energy", "emissions", "footprint", "solar", "wind", "hydro", "biodiversity", 
         "conservation", "circular economy", "circular", "economy", "waste reduction", 
         "energy efficiency", "sustainable development", "climate change", "global warming",
@@ -95,7 +95,8 @@ class Settings(BaseSettings):
         # Environmental issues
         "deforestation", "reforestation", "afforestation", "land use", "land use change",
         "ocean acidification", "plastic pollution", "microplastics", "pollution control",
-        "air quality", "water quality", "soil health", "ecosystem services", "natural capital",
+        "air quality", "water quality", "water", "water management", "water conservation", 
+        "soil health", "ecosystem services", "natural capital",
         
         # Sustainable practices
         "organic farming", "regenerative agriculture", "permaculture", "sustainable agriculture",

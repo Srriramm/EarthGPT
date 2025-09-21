@@ -56,7 +56,7 @@ async def get_current_active_user(current_user: User = Depends(get_current_user)
     return current_user
 
 
-async def get_optional_current_user(credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)) -> Optional[User]:
+async def get_optional_current_user(credentials: Optional[HTTPAuthorizationCredentials] = Depends(HTTPBearer(auto_error=False))) -> Optional[User]:
     """Get current user if authenticated, otherwise return None."""
     if not credentials:
         return None
@@ -75,5 +75,8 @@ async def get_optional_current_user(credentials: Optional[HTTPAuthorizationCrede
         
     except Exception:
         return None
+
+
+
 
 
