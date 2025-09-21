@@ -1,9 +1,12 @@
 import { useState, useCallback, useEffect } from 'react';
 import { ChatSession, Message, ChatResponse } from '../types';
 import { chatAPI } from '../services/api';
+import { authService } from '../services/auth';
+import { useAuth } from '../contexts/AuthContext';
 import { toast } from 'react-hot-toast';
 
 export const useChat = () => {
+  const { isAuthenticated } = useAuth();
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [currentSession, setCurrentSession] = useState<ChatSession | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -14,15 +17,33 @@ export const useChat = () => {
   useEffect(() => {
     const loadSessions = async () => {
       try {
-        const response = await chatAPI.getUserSessions();
-        const backendSessions = response.sessions.map((session: any) => ({
-          id: session.session_id,
-          title: session.preview || 'New Chat',
-          messages: [], // Messages will be loaded when session is selected
-          createdAt: session.created_at,
-          lastActivity: session.last_activity,
-          isActive: session.is_active,
-        }));
+        let backendSessions: ChatSession[] = [];
+        
+        if (isAuthenticated) {
+          // Use auth service for authenticated users
+          const authSessions = await authService.getUserSessions();
+          backendSessions = authSessions.map((session: any) => ({
+            id: session.id,
+            title: session.title || 'New Chat',
+            messages: [], // Messages will be loaded when session is selected
+            createdAt: session.created_at,
+            lastActivity: session.last_activity,
+            isActive: session.is_active,
+            messageCount: session.message_count || 0, // Map backend message_count to frontend messageCount
+          }));
+        } else {
+          // Use regular API for non-authenticated users
+          const response = await chatAPI.getUserSessions();
+          backendSessions = response.sessions.map((session: any) => ({
+            id: session.session_id,
+            title: session.preview || 'New Chat',
+            messages: [], // Messages will be loaded when session is selected
+            createdAt: session.created_at,
+            lastActivity: session.last_activity,
+            isActive: session.is_active,
+            messageCount: session.message_count || 0, // Map backend message_count to frontend messageCount
+          }));
+        }
         
         setSessions(backendSessions);
         
@@ -34,7 +55,13 @@ export const useChat = () => {
           
           // Load messages for the most recent session
           try {
-            const response = await chatAPI.getConversationHistory(mostRecent.id);
+            let response;
+            if (isAuthenticated) {
+              response = await authService.getSessionHistory(mostRecent.id);
+            } else {
+              response = await chatAPI.getConversationHistory(mostRecent.id);
+            }
+            
             const sessionWithMessages = {
               ...mostRecent,
               messages: response.messages || []
@@ -63,7 +90,7 @@ export const useChat = () => {
     };
     
     loadSessions();
-  }, []);
+  }, [isAuthenticated]);
 
   // Save sessions to localStorage as backup whenever sessions change
   useEffect(() => {
@@ -85,15 +112,31 @@ export const useChat = () => {
   // Create a new chat session
   const createNewSession = useCallback(async () => {
     try {
-      const response = await chatAPI.createSession();
-      const newSession: ChatSession = {
-        id: response.session_id,
-        title: 'New Chat',
-        messages: [],
-        createdAt: new Date().toISOString(),
-        lastActivity: new Date().toISOString(),
-        isActive: true,
-      };
+      let newSession: ChatSession;
+      
+      if (isAuthenticated) {
+        // Use authenticated session creation
+        const response = await authService.createSession({ title: 'New Chat' });
+        newSession = {
+          id: response.id,
+          title: response.title,
+          messages: [],
+          createdAt: response.created_at,
+          lastActivity: response.last_activity,
+          isActive: response.is_active,
+        };
+      } else {
+        // Use non-authenticated session creation
+        const response = await chatAPI.createSession();
+        newSession = {
+          id: response.session_id,
+          title: 'New Chat',
+          messages: [],
+          createdAt: new Date().toISOString(),
+          lastActivity: new Date().toISOString(),
+          isActive: true,
+        };
+      }
 
       setSessions(prev => [newSession, ...prev]);
       // Switch to new session with smooth transition
@@ -116,13 +159,19 @@ export const useChat = () => {
       setCurrentSession(newSession);
       return newSession;
     }
-  }, []);
+  }, [isAuthenticated]);
 
   // Select a session and load its messages
   const selectSession = useCallback(async (session: ChatSession) => {
     try {
       // Load messages for this session from backend
-      const response = await chatAPI.getConversationHistory(session.id);
+      let response;
+      if (isAuthenticated) {
+        response = await authService.getSessionHistory(session.id);
+      } else {
+        response = await chatAPI.getConversationHistory(session.id);
+      }
+      
       console.log('Loaded messages for session:', session.id, response.messages);
       const sessionWithMessages = {
         ...session,
@@ -134,12 +183,17 @@ export const useChat = () => {
       // Fallback to session without messages
       setCurrentSession(session);
     }
-  }, []);
+  }, [isAuthenticated]);
 
   // Delete a session
   const deleteSession = useCallback(async (sessionId: string) => {
     try {
-      await chatAPI.deleteSession(sessionId);
+      if (isAuthenticated) {
+        await authService.deleteSession(sessionId);
+      } else {
+        await chatAPI.deleteSession(sessionId);
+      }
+      
       setSessions(prev => prev.filter(session => session.id !== sessionId));
       
       if (currentSession?.id === sessionId) {
@@ -150,7 +204,7 @@ export const useChat = () => {
       console.error('Error deleting session:', error);
       toast.error('Failed to delete session');
     }
-  }, [currentSession, sessions]);
+  }, [currentSession, sessions, isAuthenticated]);
 
   // Update session title based on first message
   const updateSessionTitle = useCallback((sessionId: string, title: string) => {
@@ -199,12 +253,21 @@ export const useChat = () => {
         updateSessionTitle(currentSession.id, title);
       }
 
-      // Send message to API
-      const response: ChatResponse = await chatAPI.sendMessage({
-        message: content,
-        session_id: currentSession.id,
-        request_detailed: requestDetailed,
-      });
+      // Send message to API (use authenticated endpoint if user is logged in)
+      let response: ChatResponse;
+      if (isAuthenticated) {
+        response = await authService.sendAuthenticatedMessage({
+          message: content,
+          session_id: currentSession.id,
+          request_detailed: requestDetailed,
+        });
+      } else {
+        response = await chatAPI.sendMessage({
+          message: content,
+          session_id: currentSession.id,
+          request_detailed: requestDetailed,
+        });
+      }
 
       // Add assistant response
       const assistantMessage: Message = {
@@ -218,6 +281,7 @@ export const useChat = () => {
         ...updatedSession,
         messages: finalMessages,
         lastActivity: new Date().toISOString(),
+        messageCount: finalMessages.length, // Update message count
       };
 
       setCurrentSession(finalSession);

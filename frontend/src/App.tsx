@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Toaster } from 'react-hot-toast';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useChat } from './hooks/useChat';
@@ -12,6 +12,7 @@ import AuthPage from './components/AuthPage';
 
 const App: React.FC = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const hasAttemptedInitialSession = useRef(false);
   const { isDarkMode, toggleTheme } = useTheme();
   const { isAuthenticated, isLoading: authLoading } = useAuth();
   const {
@@ -35,14 +36,32 @@ const App: React.FC = () => {
     return () => clearInterval(interval);
   }, [checkHealth]);
 
-  // Create initial session if none exist (only after loading is complete)
+  // Create initial session if none exist (only after loading is complete and we haven't already attempted this)
   useEffect(() => {
-    if (!isLoadingSessions && sessions.length === 0) {
+    // Only auto-create a session if:
+    // 1. Sessions have finished loading
+    // 2. No sessions exist
+    // 3. We haven't already attempted to create an initial session
+    // 4. User hasn't explicitly chosen to start with no sessions (check localStorage)
+    const hasExplicitlyChosenNoSessions = localStorage.getItem('earthgpt-no-auto-session') === 'true';
+    
+    console.log('useEffect triggered:', {
+      isLoadingSessions,
+      sessionsLength: sessions.length,
+      hasAttempted: hasAttemptedInitialSession.current,
+      hasExplicitlyChosenNoSessions
+    });
+    
+    if (!isLoadingSessions && sessions.length === 0 && !hasAttemptedInitialSession.current && !hasExplicitlyChosenNoSessions) {
+      console.log('Auto-creating initial session');
+      hasAttemptedInitialSession.current = true;
       createNewSession();
     }
-  }, [isLoadingSessions, sessions.length, createNewSession]);
+  }, [isLoadingSessions, sessions.length]);
 
   const handleNewChat = async () => {
+    // Clear the "no auto-session" flag when user manually creates a chat
+    localStorage.removeItem('earthgpt-no-auto-session');
     await createNewSession();
     setSidebarOpen(false);
   };
@@ -54,6 +73,12 @@ const App: React.FC = () => {
 
   const handleDeleteSession = async (sessionId: string) => {
     await deleteSession(sessionId);
+    
+    // If this was the last session, reset the "no auto-session" flag
+    // so that a new session can be auto-created if needed
+    if (sessions.length === 1) {
+      localStorage.removeItem('earthgpt-no-auto-session');
+    }
   };
 
   const handleSendMessage = async (message: string, requestDetailed?: boolean) => {

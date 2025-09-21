@@ -1,14 +1,14 @@
 import React, { useState } from 'react';
 import { Plus, MessageSquare, Trash2 } from 'lucide-react';
-import { useAuth } from '../contexts/AuthContext';
-import { ChatSession } from '../services/auth';
+import { useChat } from '../hooks/useChat';
+import { ChatSession } from '../types';
 
 interface SessionManagerProps {
   onSessionSelect: (session: ChatSession) => void;
 }
 
 const SessionManager: React.FC<SessionManagerProps> = ({ onSessionSelect }) => {
-  const { sessions, createSession, deleteSession, currentSession } = useAuth();
+  const { sessions, createNewSession, deleteSession, currentSession } = useChat();
   const [isCreating, setIsCreating] = useState(false);
   const [newSessionTitle, setNewSessionTitle] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -19,7 +19,10 @@ const SessionManager: React.FC<SessionManagerProps> = ({ onSessionSelect }) => {
 
     setIsLoading(true);
     try {
-      const newSession = await createSession({ title: newSessionTitle.trim() });
+      const newSession = await createNewSession();
+      // Update the session title after creation
+      // Note: The createNewSession function creates a session with "New Chat" title
+      // We could enhance this to accept a custom title in the future
       setNewSessionTitle('');
       setIsCreating(false);
       onSessionSelect(newSession);
@@ -120,7 +123,7 @@ const SessionManager: React.FC<SessionManagerProps> = ({ onSessionSelect }) => {
                     </h3>
                     <div className="flex items-center mt-1 text-xs text-gray-500 dark:text-gray-400">
                       <MessageSquare className="h-3 w-3 mr-1" />
-                      <span>{session.message_count} messages</span>
+                      <span>{session.messageCount || session.messages.length} messages</span>
                     </div>
                   </div>
                   <button

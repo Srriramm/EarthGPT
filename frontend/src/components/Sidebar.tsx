@@ -113,6 +113,15 @@ const Sidebar: React.FC<SidebarProps> = ({
                 <p className="text-gray-400 dark:text-gray-500 text-xs mt-1">
                   Start a new chat to begin
                 </p>
+                <button
+                  onClick={() => {
+                    localStorage.setItem('earthgpt-no-auto-session', 'true');
+                    window.location.reload();
+                  }}
+                  className="mt-3 text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 underline"
+                >
+                  Start with no sessions
+                </button>
               </div>
             ) : (
               <AnimatePresence>
@@ -139,12 +148,17 @@ const Sidebar: React.FC<SidebarProps> = ({
                       <p className="text-sm font-medium truncate">
                         {truncateTitle(session.title)}
                       </p>
+                      {/* Session info */}
+                      <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                        {session.messageCount || session.messages?.length || 0} messages
+                      </div>
                     </div>
                     <motion.button
                       initial={{ opacity: 0 }}
                       whileHover={{ opacity: 1 }}
                       onClick={(e) => {
                         e.stopPropagation();
+                        console.log('Delete button clicked for session:', session.id);
                         onDeleteSession(session.id);
                       }}
                       className="opacity-0 group-hover:opacity-100 p-1 hover:bg-red-100 dark:hover:bg-red-900 rounded transition-all"

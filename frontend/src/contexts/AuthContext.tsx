@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { authService, User, LoginRequest, RegisterRequest, ChatSession, CreateSessionRequest } from '../services/auth';
+import { authService, User, LoginRequest, RegisterRequest } from '../services/auth';
 
 interface AuthContextType {
   user: User | null;
@@ -8,12 +8,6 @@ interface AuthContextType {
   login: (credentials: LoginRequest) => Promise<void>;
   register: (userData: RegisterRequest) => Promise<void>;
   logout: () => Promise<void>;
-  sessions: ChatSession[];
-  currentSession: ChatSession | null;
-  createSession: (sessionData: CreateSessionRequest) => Promise<ChatSession>;
-  deleteSession: (sessionId: string) => Promise<void>;
-  setCurrentSession: (session: ChatSession | null) => void;
-  refreshSessions: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -25,8 +19,6 @@ interface AuthProviderProps {
 export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [sessions, setSessions] = useState<ChatSession[]>([]);
-  const [currentSession, setCurrentSession] = useState<ChatSession | null>(null);
 
   const isAuthenticated = !!user;
 
@@ -37,10 +29,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         if (authService.isAuthenticated()) {
           const currentUser = await authService.fetchCurrentUser();
           setUser(currentUser);
-          
-          // Load user sessions
-          const userSessions = await authService.getUserSessions();
-          setSessions(userSessions);
         }
       } catch (error) {
         console.error('Failed to initialize auth:', error);
@@ -60,10 +48,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       await authService.login(credentials);
       const currentUser = await authService.fetchCurrentUser();
       setUser(currentUser);
-      
-      // Load user sessions
-      const userSessions = await authService.getUserSessions();
-      setSessions(userSessions);
     } catch (error) {
       console.error('Login failed:', error);
       throw error;
@@ -90,8 +74,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       setIsLoading(true);
       await authService.logout();
       setUser(null);
-      setSessions([]);
-      setCurrentSession(null);
     } catch (error) {
       console.error('Logout failed:', error);
     } finally {
@@ -99,42 +81,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     }
   };
 
-  const createSession = async (sessionData: CreateSessionRequest): Promise<ChatSession> => {
-    try {
-      const newSession = await authService.createSession(sessionData);
-      setSessions(prev => [newSession, ...prev]);
-      setCurrentSession(newSession);
-      return newSession;
-    } catch (error) {
-      console.error('Failed to create session:', error);
-      throw error;
-    }
-  };
-
-  const deleteSession = async (sessionId: string): Promise<void> => {
-    try {
-      await authService.deleteSession(sessionId);
-      setSessions(prev => prev.filter(session => session.id !== sessionId));
-      
-      // If the deleted session was the current one, clear it
-      if (currentSession?.id === sessionId) {
-        setCurrentSession(null);
-      }
-    } catch (error) {
-      console.error('Failed to delete session:', error);
-      throw error;
-    }
-  };
-
-  const refreshSessions = async (): Promise<void> => {
-    try {
-      const userSessions = await authService.getUserSessions();
-      setSessions(userSessions);
-    } catch (error) {
-      console.error('Failed to refresh sessions:', error);
-      throw error;
-    }
-  };
 
   const value: AuthContextType = {
     user,
@@ -143,12 +89,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     login,
     register,
     logout,
-    sessions,
-    currentSession,
-    createSession,
-    deleteSession,
-    setCurrentSession,
-    refreshSessions,
   };
 
   return (
@@ -165,5 +105,8 @@ export const useAuth = (): AuthContextType => {
   }
   return context;
 };
+
+
+
 
 

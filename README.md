@@ -1,4 +1,4 @@
-# 🌱 EarthGPT - AI-Powered Sustainability Assistant
+# EarthGPT - AI-Powered Sustainability Assistant
 
 A comprehensive AI assistant focused exclusively on sustainability, environmental topics, and climate action. Built with modern web technologies, featuring advanced guardrails, conversational memory, and intelligent response generation.
 

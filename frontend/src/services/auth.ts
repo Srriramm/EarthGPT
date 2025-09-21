@@ -128,11 +128,33 @@ class AuthService {
     }
   }
 
+  async getSessionHistory(sessionId: string): Promise<{ session_id: string; messages: any[] }> {
+    try {
+      const response = await authApi.get(`/auth/sessions/${sessionId}/history`);
+      return response.data;
+    } catch (error) {
+      console.error('Failed to fetch session history:', error);
+      throw error;
+    }
+  }
+
   async deleteSession(sessionId: string): Promise<void> {
     try {
       await authApi.delete(`/auth/sessions/${sessionId}`);
     } catch (error) {
       console.error('Failed to delete session:', error);
+      throw error;
+    }
+  }
+
+  // Chat methods for authenticated users
+  async sendAuthenticatedMessage(request: { message: string; session_id?: string; request_detailed?: boolean }): Promise<any> {
+    try {
+      // Use the regular api instance for chat endpoints since they're under /api/v1
+      const response = await api.post('/chat/authenticated', request);
+      return response.data;
+    } catch (error) {
+      console.error('Failed to send authenticated message:', error);
       throw error;
     }
   }

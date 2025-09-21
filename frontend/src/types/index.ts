@@ -11,6 +11,7 @@ export interface ChatSession {
   createdAt: string;
   lastActivity: string;
   isActive: boolean;
+  messageCount?: number; // Add message count from backend
 }
 
 export interface ChatResponse {
