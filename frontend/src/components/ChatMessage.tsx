@@ -37,14 +37,14 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
   const isAssistant = message.role === 'assistant';
 
   const markdownComponents = {
-    h1: ({node, children, ...props}: any) => <h1 className="text-xl font-bold mb-3 text-gray-900 dark:text-white" {...props}>{children}</h1>,
-    h2: ({node, children, ...props}: any) => <h2 className="text-lg font-bold mb-2 text-gray-900 dark:text-white" {...props}>{children}</h2>,
-    h3: ({node, children, ...props}: any) => <h3 className="text-base font-bold mb-2 text-gray-900 dark:text-white" {...props}>{children}</h3>,
-    h4: ({node, children, ...props}: any) => <h4 className="text-sm font-bold mb-1 text-gray-900 dark:text-white" {...props}>{children}</h4>,
+    h1: ({node, children, ...props}: any) => <h1 className="text-xl font-semibold mb-3 text-gray-900 dark:text-white" {...props}>{children}</h1>,
+    h2: ({node, children, ...props}: any) => <h2 className="text-lg font-semibold mb-2 text-gray-900 dark:text-white" {...props}>{children}</h2>,
+    h3: ({node, children, ...props}: any) => <h3 className="text-base font-semibold mb-2 text-gray-900 dark:text-white" {...props}>{children}</h3>,
+    h4: ({node, children, ...props}: any) => <h4 className="text-sm font-semibold mb-1 text-gray-900 dark:text-white" {...props}>{children}</h4>,
     p: ({node, children, ...props}: any) => <p className="mb-3 leading-relaxed text-justify" {...props}>{children}</p>,
-    ul: ({node, children, ...props}: any) => <ul className="list-disc list-inside mb-3 space-y-1" {...props}>{children}</ul>,
-    ol: ({node, children, ...props}: any) => <ol className="list-decimal list-inside mb-3 space-y-1" {...props}>{children}</ol>,
-    li: ({node, children, ...props}: any) => <li className="ml-2" {...props}>{children}</li>,
+    ul: ({node, children, ...props}: any) => <ul className="list-disc list-outside mb-3 space-y-2 ml-4" {...props}>{children}</ul>,
+    ol: ({node, children, ...props}: any) => <ol className="list-decimal list-outside mb-3 space-y-2 ml-4" {...props}>{children}</ol>,
+    li: ({node, children, ...props}: any) => <li className="leading-relaxed" {...props}>{children}</li>,
     strong: ({node, children, ...props}: any) => <strong className="font-semibold text-gray-900 dark:text-white" {...props}>{children}</strong>,
     em: ({node, children, ...props}: any) => <em className="italic" {...props}>{children}</em>,
     code: ({node, inline, className, children, ...props}: any) => 

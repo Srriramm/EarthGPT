@@ -12,10 +12,9 @@ from models.schemas import (
     HealthResponse, ErrorResponse, Message, MessageRole,
     ConversationRequestWithUser, ConversationResponseWithUser
 )
-from core.intelligent_guardrails import IntelligentGuardrails
+from guardrails import TwoLevelGuardrails
 from core.smart_memory import smart_memory_manager
 from core.hybrid_memory import get_hybrid_memory_manager
-from core.complex_questions import ComplexQuestionHandler
 from core.prompt_engineering import PromptManager
 from core.title_generator import TitleGenerator
 from services.llm_service import llm_service
@@ -26,9 +25,8 @@ from models.user import chat_session_model
 from config import settings
 
 # Initialize components
-guardrails = IntelligentGuardrails()
+guardrails = TwoLevelGuardrails()
 smart_memory = smart_memory_manager
-complex_handler = ComplexQuestionHandler()
 prompt_manager = PromptManager()
 title_generator = TitleGenerator()
 
@@ -60,20 +58,34 @@ async def chat(request: ConversationRequest, background_tasks: BackgroundTasks):
                 session_id = smart_memory.create_session("default")
         else:
             session_id = request.session_id
-            # Verify session exists in MongoDB
+            # Try to use existing session, but be more lenient
             try:
-                mongo_session = await chat_session_model.get_session_by_id(session_id, "default")
-                if not mongo_session:
-                    # Create new MongoDB session if it doesn't exist
+                # First check if session exists in smart memory
+                if smart_memory.get_session_info(session_id):
+                    logger.info(f"Using existing session {session_id} from smart memory")
+                else:
+                    # Try to restore from MongoDB
+                    mongo_session = await chat_session_model.get_session_by_id(session_id, "default")
+                    if mongo_session:
+                        # Restore session to smart memory
+                        smart_memory.create_session("default", session_id)
+                        logger.info(f"Restored session {session_id} from MongoDB to smart memory")
+                    else:
+                        # Create new session only if absolutely necessary
+                        logger.warning(f"Session {session_id} not found, creating new session")
+                        mongo_session = await chat_session_model.create_session("default", "New Chat")
+                        session_id = mongo_session.id
+                        smart_memory.create_session("default", session_id)
+            except Exception as e:
+                logger.warning(f"Failed to verify session {session_id}: {e}")
+                # Only create new session as last resort
+                try:
                     mongo_session = await chat_session_model.create_session("default", "New Chat")
                     session_id = mongo_session.id
-                # Ensure smart memory session exists
-                if not smart_memory.get_session_info(session_id):
                     smart_memory.create_session("default", session_id)
-            except Exception as e:
-                logger.warning(f"Failed to verify MongoDB session: {e}")
-                # Fallback to smart memory only
-                if not smart_memory.get_session_info(session_id):
+                    logger.info(f"Created fallback session {session_id}")
+                except Exception as fallback_error:
+                    logger.error(f"Failed to create fallback session: {fallback_error}")
                     session_id = smart_memory.create_session("default")
         
         logger.info(f"Processing chat request for session: {session_id}")
@@ -90,18 +102,40 @@ async def chat(request: ConversationRequest, background_tasks: BackgroundTasks):
         guardrail_result = guardrails.check_sustainability_relevance(request.message, conversation_context)
         
         if not guardrail_result.is_sustainability_related:
+            # Get the refusal message
+            refusal_message = guardrails.get_polite_refusal_message(guardrail_result.rejection_reason)
+            
+            # Store the out-of-domain interaction in memory
+            try:
+                hybrid_memory = get_hybrid_memory_manager()
+                user_msg_id = await hybrid_memory.store_message("default", session_id, "user", request.message)
+                assistant_msg_id = await hybrid_memory.store_message("default", session_id, "assistant", refusal_message)
+                logger.info(f"Stored out-of-domain messages in hybrid memory - User: {user_msg_id}, Assistant: {assistant_msg_id}")
+            except Exception as e:
+                logger.error(f"Failed to store out-of-domain messages in hybrid memory: {e}")
+            
+            # Update MongoDB session activity
+            try:
+                await chat_session_model.update_session_activity(session_id, "default")
+                # Sync message count from smart memory to MongoDB
+                session = smart_memory.get_session(session_id)
+                if session:
+                    await chat_session_model.sync_message_count(session_id, "default", session.message_count)
+            except Exception as e:
+                logger.warning(f"Failed to update MongoDB session activity for out-of-domain: {e}")
+            
             # Log the rejection
             background_tasks.add_task(
                 log_interaction,
                 session_id=session_id,
                 query=request.message,
-                response="",
+                response=refusal_message,
                 guardrail_triggered=True,
                 guardrail_reason=guardrail_result.rejection_reason
             )
             
             return ConversationResponse(
-                response=guardrails.get_polite_refusal_message(guardrail_result.rejection_reason),
+                response=refusal_message,
                 session_id=session_id,
                 is_summary=False,
                 can_request_detailed=False,
@@ -112,35 +146,16 @@ async def chat(request: ConversationRequest, background_tasks: BackgroundTasks):
         
         # Step 3: Get optimized context from smart memory system (already retrieved above)
         
-        # Step 4: Use query classifier to determine response length
-        # Get conversation history for classification
-        conversation_history = []
-        if context.get('conversation_history'):
-            conversation_history = [msg['content'] for msg in context['conversation_history'] if msg.get('role') == 'user']
-        
-        # Import and use the query classifier
-        from core.query_classifier import QueryClassifier, ResponseLength
-        classifier = QueryClassifier()
-        query_type, response_length = classifier.classify_query(request.message, conversation_history)
-        
-        # Check if this should be a detailed response
-        is_detailed_request = (
-            request.request_detailed or 
-            response_length == ResponseLength.DETAILED or
-            _is_elaboration_request(request.message, conversation_history)
-        )
-        
-        # Step 5: Generate response using LLM with appropriate length
-        is_detailed = is_detailed_request
+        # Step 4: Generate response using LLM (let LLM decide response length naturally)
         messages = prompt_manager.create_conversation_prompt(
             request.message, 
             context, 
-            is_detailed=is_detailed,
+            is_detailed=request.request_detailed,  # Only use explicit user request
             is_summary=False
         )
         
         # Generate response from LLM with token management
-        llm_result = llm_service.generate_response(messages, is_detailed=is_detailed)
+        llm_result = llm_service.generate_response(messages, is_detailed=request.request_detailed)
         
         # Handle token management results
         if llm_result.get("error"):
@@ -264,47 +279,73 @@ async def chat_authenticated(
     Authenticated chat endpoint for sustainability conversations with user context.
     """
     try:
+        # Step 0: Restore user sessions from database first to avoid duplicates
+        if request.session_id:
+            # Only restore if we have a specific session_id to look for
+            if not smart_memory.get_session_info(request.session_id):
+                logger.info(f"Session {request.session_id} not in memory, attempting to restore from database")
+                restored_count = await smart_memory.restore_user_sessions_from_database(current_user.id)
+                logger.info(f"Restored {restored_count} sessions for user {current_user.id}")
+        
         # Generate session ID if not provided
         if not request.session_id:
-            # Create MongoDB session first, then use its ID for smart memory
+            # Create new session only when no session_id is provided
             try:
                 mongo_session = await chat_session_model.create_session(current_user.id, "New Chat")
                 session_id = mongo_session.id  # Use the session_id from MongoDB
                 # Create corresponding smart memory session
                 smart_memory.create_session(current_user.id, session_id)
+                logger.info(f"Created new authenticated session {session_id} for user {current_user.id}")
             except Exception as e:
                 logger.error(f"Failed to create MongoDB session for user {current_user.id}: {e}")
                 # Fallback to smart memory only
                 session_id = smart_memory.create_session(current_user.id)
         else:
             session_id = request.session_id
-            # Verify session belongs to user in MongoDB
+            # Try to use existing session, but be more lenient
             try:
-                mongo_session = await chat_session_model.get_session_by_id(session_id, current_user.id)
-                if not mongo_session:
-                    # Create new MongoDB session if it doesn't exist or doesn't belong to user
-                    mongo_session = await chat_session_model.create_session(current_user.id, "New Chat")
-                    session_id = mongo_session.id
-                else:
+                # First check if session exists in smart memory
+                if smart_memory.get_session_info(session_id):
+                    logger.info(f"Using existing authenticated session {session_id} from smart memory")
                     # Update session activity
                     await chat_session_model.update_session_activity(session_id, current_user.id)
-                
-                # Ensure smart memory session exists
-                if not smart_memory.get_session_info(session_id):
-                    smart_memory.create_session(current_user.id, session_id)
+                else:
+                    # Try to restore from MongoDB
+                    mongo_session = await chat_session_model.get_session_by_id(session_id, current_user.id)
+                    if mongo_session:
+                        # Restore session to smart memory
+                        smart_memory.create_session(current_user.id, session_id)
+                        await chat_session_model.update_session_activity(session_id, current_user.id)
+                        logger.info(f"Restored authenticated session {session_id} from MongoDB to smart memory")
+                    else:
+                        # Create new session only if absolutely necessary
+                        logger.warning(f"Authenticated session {session_id} not found, creating new session")
+                        mongo_session = await chat_session_model.create_session(current_user.id, "New Chat")
+                        session_id = mongo_session.id
+                        smart_memory.create_session(current_user.id, session_id)
             except Exception as e:
-                logger.warning(f"Failed to verify MongoDB session: {e}")
-                # Fallback to smart memory only
-                if not smart_memory.get_session_info(session_id):
+                logger.warning(f"Failed to verify authenticated session {session_id}: {e}")
+                # Only create new session as last resort
+                try:
+                    mongo_session = await chat_session_model.create_session(current_user.id, "New Chat")
+                    session_id = mongo_session.id
+                    smart_memory.create_session(current_user.id, session_id)
+                    logger.info(f"Created fallback authenticated session {session_id}")
+                except Exception as fallback_error:
+                    logger.error(f"Failed to create fallback authenticated session: {fallback_error}")
                     session_id = smart_memory.create_session(current_user.id)
         
         logger.info(f"Processing authenticated chat request for user {current_user.id}, session: {session_id}")
         
-        # Step 0: Restore user sessions from database if not already in memory
-        if not smart_memory.get_session_info(session_id):
-            logger.info(f"Session {session_id} not in memory, attempting to restore from database")
-            restored_count = await smart_memory.restore_user_sessions_from_database(current_user.id)
-            logger.info(f"Restored {restored_count} sessions for user {current_user.id}")
+        # Step 0.1: Check if session exists but has wrong user_id (from anonymous usage)
+        session_info = smart_memory.get_session_info(session_id)
+        if session_info and session_info.get("user_id") == "default":
+            logger.info(f"Session {session_id} has default user_id, updating to authenticated user {current_user.id}")
+            # Update the session's user_id
+            session = smart_memory.get_session(session_id)
+            if session:
+                session.user_id = current_user.id
+                logger.info(f"Updated session {session_id} user_id from 'default' to {current_user.id}")
         
         # Step 1: Get conversation context for guardrail check
         context = smart_memory.get_optimized_context(session_id, request.message, current_user.id)
@@ -318,90 +359,69 @@ async def chat_authenticated(
         guardrail_result = guardrails.check_sustainability_relevance(request.message, conversation_context)
         
         if not guardrail_result.is_sustainability_related:
+            # Get the refusal message
+            refusal_message = guardrails.get_polite_refusal_message(guardrail_result.rejection_reason)
+            
+            # Store the out-of-domain interaction in memory
+            try:
+                hybrid_memory = get_hybrid_memory_manager()
+                user_msg_id = await hybrid_memory.store_message(current_user.id, session_id, "user", request.message)
+                assistant_msg_id = await hybrid_memory.store_message(current_user.id, session_id, "assistant", refusal_message)
+                logger.info(f"Stored authenticated out-of-domain messages in hybrid memory - User: {user_msg_id}, Assistant: {assistant_msg_id}")
+            except Exception as e:
+                logger.error(f"Failed to store authenticated out-of-domain messages in hybrid memory: {e}")
+            
+            # Update MongoDB session activity
+            try:
+                await chat_session_model.update_session_activity(session_id, current_user.id)
+                # Sync message count from smart memory to MongoDB
+                session = smart_memory.get_session(session_id)
+                if session:
+                    await chat_session_model.sync_message_count(session_id, current_user.id, session.message_count)
+            except Exception as e:
+                logger.warning(f"Failed to update MongoDB session activity for authenticated out-of-domain: {e}")
+            
             # Log the rejection
             background_tasks.add_task(
                 log_interaction_authenticated,
                 user_id=current_user.id,
                 session_id=session_id,
                 query=request.message,
-                response="",
+                response=refusal_message,
                 guardrail_triggered=True,
                 guardrail_reason=guardrail_result.rejection_reason
             )
             
+            # Get current message count from session
+            current_message_count = 0
+            session = smart_memory.get_session(session_id)
+            if session:
+                current_message_count = session.message_count
+
             return ConversationResponseWithUser(
-                response=guardrails.get_polite_refusal_message(guardrail_result.rejection_reason),
+                response=refusal_message,
                 session_id=session_id,
                 user_id=current_user.id,
                 is_summary=False,
                 can_request_detailed=False,
                 guardrail_triggered=True,
-                guardrail_reason=guardrail_result.rejection_reason
+                guardrail_reason=guardrail_result.rejection_reason,
+                message_count=current_message_count,
+                summarization_triggered=False  # No summarization for blocked queries
             )
         
-        # Step 3: Use query classifier to determine response length
-        # Get conversation history for classification
-        conversation_history = []
-        if context.get('conversation_history'):
-            conversation_history = [msg['content'] for msg in context['conversation_history'] if msg.get('role') == 'user']
+        # Step 3: Memory retrieval (already retrieved above)
         
-        # Import and use the query classifier
-        from core.query_classifier import QueryClassifier, ResponseLength
-        classifier = QueryClassifier()
-        query_type, response_length = classifier.classify_query(request.message, conversation_history)
-        
-        # Check if this should be a detailed response
-        is_detailed_request = (
-            request.request_detailed or 
-            response_length == ResponseLength.DETAILED or
-            _is_elaboration_request(request.message, conversation_history)
-        )
-        
-        # Step 4: Memory retrieval (already retrieved above)
-        
-        # Step 5: Complex question handling
-        if query_type.value in ["complex_explanation", "comparison", "how_to"]:
-            complex_response = complex_handler.handle_complex_question(
-                query=request.message,
-                context=context,
-                classification=(query_type, response_length)
-            )
-            
-            if complex_response:
-                # Store the interaction
-                smart_memory.add_message_with_token_tracking(session_id, "user", request.message, current_user.id)
-                smart_memory.add_message_with_token_tracking(session_id, "assistant", complex_response, current_user.id)
-                
-                # Log the interaction
-                background_tasks.add_task(
-                    log_interaction_authenticated,
-                    user_id=current_user.id,
-                    session_id=session_id,
-                    query=request.message,
-                    response=complex_response,
-                    guardrail_triggered=False
-                )
-                
-                return ConversationResponseWithUser(
-                    response=complex_response,
-                    session_id=session_id,
-                    user_id=current_user.id,
-                    is_summary=response_length.value == "short",
-                    can_request_detailed=response_length.value == "short",
-                    guardrail_triggered=False
-                )
-        
-        # Step 5: Generate response using LLM with appropriate length
-        is_detailed = is_detailed_request
+        # Step 4: Generate response using LLM (let LLM decide response length naturally)
         messages = prompt_manager.create_conversation_prompt(
             request.message, 
             context, 
-            is_detailed=is_detailed,
+            is_detailed=request.request_detailed,  # Only use explicit user request
             is_summary=False
         )
         
         # Generate response from LLM with token management
-        llm_result = llm_service.generate_response(messages, is_detailed=is_detailed)
+        llm_result = llm_service.generate_response(messages, is_detailed=request.request_detailed)
         
         # Handle token management results
         if llm_result.get("error"):
@@ -459,8 +479,11 @@ async def chat_authenticated(
             logger.warning(f"Failed to check session info for title generation: {e}")
         
         # Step 7.1: Add messages to conversation history with token tracking
-        smart_memory.add_message_with_token_tracking(session_id, "user", request.message, current_user.id)
-        smart_memory.add_message_with_token_tracking(session_id, "assistant", response_text, current_user.id)
+        user_memory_result = smart_memory.add_message_with_token_tracking(session_id, "user", request.message, current_user.id)
+        assistant_memory_result = smart_memory.add_message_with_token_tracking(session_id, "assistant", response_text, current_user.id)
+        
+        # Check if summarization was triggered
+        summarization_triggered = assistant_memory_result.get("summarization_triggered", False)
         
         # Step 7.2: Auto-generate title if this was the first user message
         if should_generate_title:
@@ -510,13 +533,21 @@ async def chat_authenticated(
             guardrail_triggered=False
         )
         
+        # Get current message count from session
+        current_message_count = 0
+        session = smart_memory.get_session(session_id)
+        if session:
+            current_message_count = session.message_count
+
         return ConversationResponseWithUser(
             response=response_text,
             session_id=session_id,
             user_id=current_user.id,
-            is_summary=response_length.value == "short",
-            can_request_detailed=response_length.value == "short",
-            guardrail_triggered=False
+            is_summary=False,  # Let LLM decide response style naturally
+            can_request_detailed=False,  # No artificial restrictions
+            guardrail_triggered=False,
+            message_count=current_message_count,
+            summarization_triggered=summarization_triggered
         )
         
     except Exception as e:
@@ -769,39 +800,6 @@ async def get_all_sessions():
         "total_sessions": len(sessions),
         "sessions": sessions
     }
-
-
-def _is_elaboration_request(query: str, conversation_history: List[str]) -> bool:
-    """Check if the query is asking for elaboration on a previous topic."""
-    query_lower = query.lower().strip()
-    
-    # Direct elaboration requests
-    elaboration_patterns = [
-        r'\b(?:explain|elaborate|detail|comprehensive|thorough|in-depth|extensive)\b.*\b(?:detail|depth|more)\b',
-        r'\bexplain\s+(?:me\s+)?(?:that\s+)?in\s+detail\b',
-        r'\bcan\s+you\s+elaborate\b',
-        r'\btell\s+me\s+more\s+about\b',
-        r'\bprovide\s+(?:a\s+)?(?:detailed|comprehensive|thorough)\b',
-        r'\bgive\s+me\s+(?:a\s+)?(?:detailed|comprehensive|full)\b',
-        r'\bbreak\s+down\b',
-        r'\bcomprehensive\s+(?:analysis|explanation|overview)\b',
-        r'\byes\s+explain\s+(?:that\s+)?(?:in\s+)?detail',
-        r'\belaborate\s+(?:on\s+)?(?:that|it)\b',
-        r'\bmore\s+detailed?\s+(?:information|explanation)\b',
-        r'\bgo\s+into\s+(?:more\s+)?detail\b'
-    ]
-    
-    for pattern in elaboration_patterns:
-        if re.search(pattern, query_lower):
-            return True
-    
-    # Simple affirmative responses that might be follow-ups
-    simple_affirmatives = ['yes', 'yeah', 'sure', 'ok', 'okay', 'yep']
-    words = query_lower.strip().split()
-    if len(words) <= 2 and words[0].lower() in simple_affirmatives and conversation_history:
-        return True
-    
-    return False
 
 
 async def log_interaction(

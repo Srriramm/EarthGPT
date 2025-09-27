@@ -3,16 +3,21 @@
 import re
 from typing import List, Tuple, Optional, Dict
 from loguru import logger
-from models.schemas import GuardrailCheck
-from config import settings
+
+from .base import BaseGuardrails
+from .models import GuardrailCheck
+from .config import GuardrailsConfig
 
 
-class IntelligentGuardrails:
+class IntelligentGuardrails(BaseGuardrails):
     """Intelligent guardrails system that understands sustainability context semantically."""
     
-    def __init__(self):
+    def __init__(self, config: GuardrailsConfig = None):
+        """Initialize intelligent guardrails."""
+        super().__init__()
+        self.config = config or GuardrailsConfig()
         self.sustainability_keywords = set(
-            keyword.lower() for keyword in settings.sustainability_keywords
+            keyword.lower() for keyword in self.config.sustainability_keywords
         )
         
         # Core sustainability concepts with weights
@@ -139,8 +144,9 @@ class IntelligentGuardrails:
             r'\b(?:geometry|algebra|calculus|statistics|probability|theorem|proof)\b',
             r'\b(?:logic|logical|reasoning|deduction|induction|syllogism)\b',
             # Block physics and motion-related topics
-            r'\b(?:physics|physical|motion|velocity|acceleration|force|momentum|kinetic|potential)\b(?!\s+(?:sustainable|renewable|clean|green|environmental|efficiency|transition|storage|security))',
-            r'\b(?:tangential|circular|linear|rotational|oscillatory|harmonic|wave|frequency|amplitude)\b',
+            r'\b(?:physics|physical|motion|velocity|acceleration|momentum|kinetic|potential)\b(?!\s+(?:sustainable|renewable|clean|green|environmental|efficiency|transition|storage|security))',
+            r'\bforce\b(?!\s+(?:on|of|for|with|in|to|from|by|at|under|over|through|across|around|beyond|within|without|sustainable|renewable|clean|green|environmental|efficiency|transition|storage|security|task|work|labor|workforce|enforcement|reinforcement))',
+            r'\b(?:tangential|linear|rotational|oscillatory|harmonic|wave|frequency|amplitude)\b(?!\s+(?:economy|business|model|approach|design|thinking|supply|chain|waste|reuse|recycle))',
             r'\b(?:mechanics|thermodynamics|electromagnetism|quantum|relativity|particle|atom|molecule)\b',
             r'\b(?:newton|einstein|maxwell|schrodinger|heisenberg|planck|bohr|rutherford)\b',
             r'\b(?:bodybuilding|muscle|fitness|workout|exercise|gym|training)\b.*\b(?:sustainable|diet|nutrition)\b(?!\s+(?:environmental|eco|green))',
@@ -241,7 +247,14 @@ class IntelligentGuardrails:
             (keyword_matches >= 1) or  # At least ONE sustainability keyword
             (keyword_matches >= 1 and sustainability_score >= 0.1) or  # One keyword + low semantic score
             (keyword_matches >= 1 and len(query_lower) > 50) or  # One keyword + moderate content
-            (sustainability_score >= 0.1 and len(query_lower) > 100)  # Low semantic score + substantial content
+            (sustainability_score >= 0.1 and len(query_lower) > 100) or  # Low semantic score + substantial content
+            # NEW: Be more lenient with longer, complex queries that might be sustainability-related
+            (len(query_lower) > 200 and sustainability_score >= 0.05) or  # Long queries with minimal sustainability indicators
+            (keyword_matches >= 2 and len(query_lower) > 100) or  # Multiple keywords + substantial content
+            # Allow queries that mention business/company context with sustainability terms
+            (any(term in query_lower for term in ['company', 'business', 'organization', 'corporate', 'enterprise', 'firm']) and 
+             any(term in query_lower for term in ['sustainable', 'environmental', 'green', 'esg', 'climate', 'carbon', 'renewable']) and
+             len(query_lower) > 100)
         )
         
         if not is_sustainability_related:
@@ -305,9 +318,13 @@ class IntelligentGuardrails:
         
         # Normalize score to -1 to 1 range, then convert to 0-1 for final score
         normalized_score = max(-1.0, min(1.0, score))
-        final_score = (normalized_score + 1.0) / 2.0  # Convert to 0-1 range
         
-        return final_score
+        # If the score is negative (non-sustainability), return 0
+        if normalized_score < 0:
+            return 0.0
+        
+        # For positive scores, return as-is (0-1 range)
+        return normalized_score
     
     def _check_contextual_sustainability(self, query_lower: str) -> bool:
         """Check for contextual sustainability indicators with advanced semantic understanding."""

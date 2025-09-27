@@ -47,29 +47,53 @@ export const useChat = () => {
         
         setSessions(backendSessions);
         
+        // Check if we have a persisted current session ID
+        const persistedSessionId = localStorage.getItem('earthgpt-current-session-id');
+        
         // Set the most recent session as current and load its messages
         if (backendSessions.length > 0) {
-          const mostRecent = backendSessions.reduce((latest: ChatSession, current: ChatSession) => 
-            new Date(current.lastActivity) > new Date(latest.lastActivity) ? current : latest
-          );
+          let targetSession: ChatSession;
           
-          // Load messages for the most recent session
+          // Try to restore the persisted session first
+          if (persistedSessionId) {
+            const persistedSession = backendSessions.find(s => s.id === persistedSessionId);
+            if (persistedSession) {
+              targetSession = persistedSession;
+              console.log('Restored persisted session:', persistedSessionId);
+            } else {
+              // Fallback to most recent if persisted session not found
+              targetSession = backendSessions.reduce((latest: ChatSession, current: ChatSession) => 
+                new Date(current.lastActivity) > new Date(latest.lastActivity) ? current : latest
+              );
+            }
+          } else {
+            // Use most recent session
+            targetSession = backendSessions.reduce((latest: ChatSession, current: ChatSession) => 
+              new Date(current.lastActivity) > new Date(latest.lastActivity) ? current : latest
+            );
+          }
+          
+          // Load messages for the target session
           try {
             let response;
             if (isAuthenticated) {
-              response = await authService.getSessionHistory(mostRecent.id);
+              response = await authService.getSessionHistory(targetSession.id);
             } else {
-              response = await chatAPI.getConversationHistory(mostRecent.id);
+              response = await chatAPI.getConversationHistory(targetSession.id);
             }
             
             const sessionWithMessages = {
-              ...mostRecent,
+              ...targetSession,
               messages: response.messages || []
             };
             setCurrentSession(sessionWithMessages);
+            
+            // Persist the current session ID
+            localStorage.setItem('earthgpt-current-session-id', targetSession.id);
           } catch (error) {
-            console.error('Error loading messages for most recent session:', error);
-            setCurrentSession(mostRecent);
+            console.error('Error loading messages for target session:', error);
+            setCurrentSession(targetSession);
+            localStorage.setItem('earthgpt-current-session-id', targetSession.id);
           }
         }
       } catch (error) {
@@ -141,6 +165,9 @@ export const useChat = () => {
       setSessions(prev => [newSession, ...prev]);
       // Switch to new session with smooth transition
       setCurrentSession(newSession);
+      
+      // Persist the new session ID
+      localStorage.setItem('earthgpt-current-session-id', newSession.id);
       return newSession;
     } catch (error) {
       console.error('Error creating session:', error);
@@ -157,6 +184,9 @@ export const useChat = () => {
       setSessions(prev => [newSession, ...prev]);
       // Switch to new session with smooth transition
       setCurrentSession(newSession);
+      
+      // Persist the new session ID
+      localStorage.setItem('earthgpt-current-session-id', newSession.id);
       return newSession;
     }
   }, [isAuthenticated]);
@@ -178,10 +208,14 @@ export const useChat = () => {
         messages: response.messages || []
       };
       setCurrentSession(sessionWithMessages);
+      
+      // Persist the selected session ID
+      localStorage.setItem('earthgpt-current-session-id', session.id);
     } catch (error) {
       console.error('Error loading session messages:', error);
       // Fallback to session without messages
       setCurrentSession(session);
+      localStorage.setItem('earthgpt-current-session-id', session.id);
     }
   }, [isAuthenticated]);
 
@@ -198,7 +232,13 @@ export const useChat = () => {
       
       if (currentSession?.id === sessionId) {
         const remainingSessions = sessions.filter(session => session.id !== sessionId);
-        setCurrentSession(remainingSessions.length > 0 ? remainingSessions[0] : null);
+        if (remainingSessions.length > 0) {
+          setCurrentSession(remainingSessions[0]);
+          localStorage.setItem('earthgpt-current-session-id', remainingSessions[0].id);
+        } else {
+          setCurrentSession(null);
+          localStorage.removeItem('earthgpt-current-session-id');
+        }
       }
     } catch (error) {
       console.error('Error deleting session:', error);
@@ -269,7 +309,7 @@ export const useChat = () => {
         });
       }
 
-      // Add assistant response
+      // Add assistant response (including rejection messages)
       const assistantMessage: Message = {
         role: 'assistant',
         content: response.response,
@@ -277,11 +317,13 @@ export const useChat = () => {
       };
 
       const finalMessages = [...updatedMessages, assistantMessage];
+
       const finalSession = {
         ...updatedSession,
         messages: finalMessages,
         lastActivity: new Date().toISOString(),
-        messageCount: finalMessages.length, // Update message count
+        messageCount: response.message_count || finalMessages.length, // Use backend message count
+        isSummarizing: response.summarization_triggered || false,
       };
 
       setCurrentSession(finalSession);
@@ -289,10 +331,19 @@ export const useChat = () => {
         session.id === currentSession.id ? finalSession : session
       ));
 
-      // Show guardrail warning if triggered
-      if (response.guardrail_triggered) {
-        toast.error('This topic is outside my sustainability focus. Please ask about environmental topics.');
+      // Auto-hide summarization indicator after 3 seconds
+      if (response.summarization_triggered) {
+        setTimeout(() => {
+          setCurrentSession(prev => prev ? { ...prev, isSummarizing: false } : null);
+          setSessions(prev => prev.map(session => 
+            session.id === currentSession.id 
+              ? { ...session, isSummarizing: false }
+              : session
+          ));
+        }, 3000);
       }
+
+      // No toast notification for guardrail triggers - silent blocking
 
     } catch (error) {
       console.error('Error sending message:', error);

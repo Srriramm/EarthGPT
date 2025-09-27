@@ -2,7 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Message } from '../types';
 import ChatMessage from './ChatMessage';
-import { AlertTriangle } from 'lucide-react';
+import SummarizationIndicator from './SummarizationIndicator';
 
 interface ChatAreaProps {
   messages: Message[];
@@ -12,6 +12,7 @@ interface ChatAreaProps {
   onRequestDetailed?: () => void;
   guardrailTriggered?: boolean;
   guardrailReason?: string;
+  isSummarizing?: boolean;
 }
 
 const ChatArea: React.FC<ChatAreaProps> = ({
@@ -22,6 +23,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   onRequestDetailed,
   guardrailTriggered = false,
   guardrailReason,
+  isSummarizing = false,
 }) => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -47,6 +49,9 @@ const ChatArea: React.FC<ChatAreaProps> = ({
           </h2>
         </motion.div>
       )}
+
+      {/* Summarization Indicator */}
+      <SummarizationIndicator isVisible={isSummarizing} />
 
       {/* Messages */}
       <AnimatePresence>
@@ -90,30 +95,6 @@ const ChatArea: React.FC<ChatAreaProps> = ({
         </motion.div>
       )}
 
-      {/* Guardrail Warning */}
-      {guardrailTriggered && (
-        <motion.div
-          initial={{ opacity: 0, scale: 0.95 }}
-          animate={{ opacity: 1, scale: 1 }}
-          className="w-full p-4 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg"
-        >
-          <div className="flex items-start gap-3">
-            <AlertTriangle className="w-5 h-5 text-yellow-600 dark:text-yellow-400 mt-0.5 flex-shrink-0" />
-            <div>
-              <h3 className="font-medium text-yellow-800 dark:text-yellow-200 mb-1">
-                Topic Outside Sustainability Focus
-              </h3>
-              <p className="text-sm text-yellow-700 dark:text-yellow-300 mb-2">
-                {guardrailReason || "I'm a sustainability expert assistant focused on environmental topics, climate action, and sustainable practices."}
-              </p>
-              <p className="text-sm text-yellow-700 dark:text-yellow-300">
-                I'd be happy to help with questions about renewable energy, carbon reduction, ESG, 
-                or other sustainability-related topics!
-              </p>
-            </div>
-          </div>
-        </motion.div>
-      )}
 
       {/* Scroll anchor */}
       <div ref={messagesEndRef} />

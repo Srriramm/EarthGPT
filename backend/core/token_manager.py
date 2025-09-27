@@ -79,12 +79,13 @@ class TokenCounter:
 @dataclass
 class ContextWindowConfig:
     """Configuration for context window management."""
-    max_context_tokens: int = 200000  # Claude 3.5 Haiku limit
+    max_context_tokens: int = 200000  # Claude 3.5 Sonnet limit
     max_output_tokens: int = 8192     # Max response tokens
     warning_threshold: float = 0.8    # 80% of context window
-    critical_threshold: float = 0.9   # 90% of context window
+    critical_threshold: float = 0.95  # 95% of context window (190k tokens)
     buffer_tokens: int = 1000         # Safety buffer
     min_history_tokens: int = 2000    # Minimum tokens to keep in history
+    summarization_threshold: int = 190000  # Trigger summarization at 190k tokens
 
 
 class ContextWindowManager:

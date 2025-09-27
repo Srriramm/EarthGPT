@@ -59,12 +59,7 @@ class HealthResponse(BaseModel):
     model_config = {"protected_namespaces": ()}
 
 
-class GuardrailCheck(BaseModel):
-    """Guardrail validation result."""
-    is_sustainability_related: bool
-    confidence_score: float
-    detected_keywords: List[str]
-    rejection_reason: Optional[str] = None
+# GuardrailCheck moved to guardrails.models module
 
 
 class MemoryContext(BaseModel):
@@ -164,4 +159,6 @@ class ConversationResponseWithUser(BaseModel):
     can_request_detailed: bool = False
     guardrail_triggered: bool = False
     guardrail_reason: Optional[str] = None
+    message_count: int = 0  # Current message count for the session
+    summarization_triggered: bool = False  # Whether context summarization was triggered
     timestamp: datetime = Field(default_factory=datetime.utcnow)

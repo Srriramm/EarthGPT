@@ -43,21 +43,24 @@ const App: React.FC = () => {
     // 2. No sessions exist
     // 3. We haven't already attempted to create an initial session
     // 4. User hasn't explicitly chosen to start with no sessions (check localStorage)
+    // 5. We're not in the middle of a page refresh (check if we have a current session)
     const hasExplicitlyChosenNoSessions = localStorage.getItem('earthgpt-no-auto-session') === 'true';
+    const hasCurrentSession = currentSession !== null;
     
     console.log('useEffect triggered:', {
       isLoadingSessions,
       sessionsLength: sessions.length,
       hasAttempted: hasAttemptedInitialSession.current,
-      hasExplicitlyChosenNoSessions
+      hasExplicitlyChosenNoSessions,
+      hasCurrentSession
     });
     
-    if (!isLoadingSessions && sessions.length === 0 && !hasAttemptedInitialSession.current && !hasExplicitlyChosenNoSessions) {
+    if (!isLoadingSessions && sessions.length === 0 && !hasAttemptedInitialSession.current && !hasExplicitlyChosenNoSessions && !hasCurrentSession) {
       console.log('Auto-creating initial session');
       hasAttemptedInitialSession.current = true;
       createNewSession();
     }
-  }, [isLoadingSessions, sessions.length]);
+  }, [isLoadingSessions, sessions.length, currentSession]);
 
   const handleNewChat = async () => {
     // Clear the "no auto-session" flag when user manually creates a chat
@@ -166,6 +169,7 @@ const App: React.FC = () => {
                       messages={currentSession?.messages || []}
                       isLoading={isLoading}
                       onRequestDetailed={handleRequestDetailed}
+                      isSummarizing={currentSession?.isSummarizing || false}
                     />
                   </motion.div>
                 </AnimatePresence>

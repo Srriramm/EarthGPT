@@ -340,12 +340,18 @@ class SmartMemoryManager(MemoryManager):
             logger.info(f"Triggering smart summarization for session {session_id}")
             self._smart_summarize_session(session)
             result["summarized"] = True
+            result["summarization_triggered"] = True
         
         return result
     
     def _should_trigger_smart_summarization(self, session: SmartSessionMemory, usage_info: Dict[str, Any]) -> bool:
         """Determine if smart summarization should be triggered based on token usage."""
-        # Trigger if approaching context limits
+        # Trigger if approaching 190k token threshold
+        total_tokens = usage_info.get("total_tokens", 0)
+        if total_tokens >= self.context_manager.config.summarization_threshold:
+            return True
+        
+        # Also trigger if approaching context limits
         if usage_info["is_critical"] or usage_info["is_overflow"]:
             return True
         
@@ -461,10 +467,11 @@ Return ONLY the updated summary."""
         # Calculate usage and determine if truncation is needed
         usage_info = self.context_manager.calculate_usage(messages, max_output_tokens)
         
-        # If we need to truncate, do it
+        # If we need to truncate, do it with summarization
         if self.context_manager.should_truncate(messages, max_output_tokens):
-            truncated_messages, truncation_info = self.context_manager.truncate_conversation(
-                messages, max_output_tokens
+            # Try to summarize older messages instead of just truncating
+            truncated_messages, truncation_info = self._truncate_with_summarization(
+                session, messages, max_output_tokens
             )
             
             # Update session with truncated history
@@ -478,99 +485,12 @@ Return ONLY the updated summary."""
         # Get recent messages for context
         recent_messages = session.recent_messages()
         
-        # NEW: Search for relevant old messages using semantic search
+        # Focus on maintaining chronological conversation flow
+        # Skip semantic search to avoid disrupting natural conversation context
         relevant_documents = []
-        try:
-            # Import here to avoid circular imports
-            from core.hybrid_memory import get_hybrid_memory_manager
-            
-            # Get hybrid memory manager
-            hybrid_memory = get_hybrid_memory_manager()
-            
-            # Check if we have a real hybrid memory manager (not mock)
-            if hasattr(hybrid_memory, 'search_similar_messages'):
-                # Use thread pool to run async code in sync context
-                try:
-                    import concurrent.futures
-                    import asyncio
-                    
-                    def run_async_search():
-                        try:
-                            # Create new event loop in thread
-                            loop = asyncio.new_event_loop()
-                            asyncio.set_event_loop(loop)
-                            try:
-                                return loop.run_until_complete(
-                                    hybrid_memory.search_similar_messages(
-                                        query=query,
-                                        user_id=user_id,
-                                        session_id=session_id,
-                                        limit=5  # Limit to top 5 most relevant
-                                    )
-                                )
-                            finally:
-                                loop.close()
-                        except Exception as e:
-                            logger.warning(f"Async search failed: {e}")
-                            return []
-                    
-                    # Run in thread pool to avoid event loop conflicts
-                    with concurrent.futures.ThreadPoolExecutor() as executor:
-                        future = executor.submit(run_async_search)
-                        similar_messages = future.result(timeout=10)  # Increased to 10 second timeout
-                    
-                    logger.debug(f"Retrieved {len(similar_messages)} similar messages from hybrid memory")
-                    
-                    # Convert to relevant documents format
-                    for i, msg in enumerate(similar_messages):
-                        try:
-                            # Only include messages that are NOT in recent history
-                            msg_content = msg.get('content', '')
-                            msg_role = msg.get('role', '')
-                            msg_timestamp = msg.get('timestamp', '')
-                            
-                            logger.debug(f"Processing message {i+1}: role={msg_role}, content_length={len(msg_content)}")
-                            
-                            # Check if this message is already in recent history
-                            is_recent = False
-                            try:
-                                is_recent = any(
-                                    content == msg_content and role == msg_role 
-                                    for role, content in recent_messages
-                                )
-                            except Exception as comparison_error:
-                                logger.warning(f"Error comparing messages: {comparison_error}")
-                                is_recent = False
-                            
-                            if not is_recent and msg_content:
-                                relevant_documents.append({
-                                    "content": msg_content,
-                                    "metadata": {
-                                        "role": msg_role,
-                                        "timestamp": msg_timestamp,
-                                        "session_id": session_id,
-                                        "topic": "previous_conversation"
-                                    }
-                                })
-                                logger.debug(f"Added message {i+1} to relevant documents")
-                        except Exception as msg_error:
-                            logger.warning(f"Error processing message {i+1}: {msg_error}")
-                            continue
-                    
-                    logger.info(f"Found {len(relevant_documents)} relevant old messages for query: {query[:50]}...")
-                    
-                except concurrent.futures.TimeoutError:
-                    logger.warning("Semantic search timed out after 10 seconds")
-                    relevant_documents = []
-                except Exception as e:
-                    logger.warning(f"Semantic search failed: {type(e).__name__}: {e}")
-                    relevant_documents = []
-            else:
-                logger.debug("Hybrid memory not available, skipping semantic search")
-                
-        except Exception as e:
-            logger.warning(f"Failed to perform semantic search: {type(e).__name__}: {e}")
-            relevant_documents = []
+        logger.info(f"Using chronological conversation history for session {session_id} - maintaining natural conversation flow")
+        
+        logger.info(f"Using chronological conversation history for session {session_id}: {len(truncated_messages)} messages")
         
         # Create context summary
         context_parts = []
@@ -581,13 +501,29 @@ Return ONLY the updated summary."""
                            for role, content in recent_messages if role == "user"]
             if recent_topics:
                 context_parts.append(f"Recent topics: {', '.join(recent_topics)}")
-        if relevant_documents:
-            context_parts.append(f"Found {len(relevant_documents)} relevant previous messages")
         
         context_summary = "; ".join(context_parts) if context_parts else "No specific context available"
         
+        # Ensure conversation history maintains proper chronological flow
+        # Convert truncated messages to proper format for LLM
+        conversation_history = []
+        for msg in truncated_messages:
+            if isinstance(msg, dict):
+                conversation_history.append({
+                    "role": msg.get("role", "user"),
+                    "content": msg.get("content", ""),
+                    "timestamp": msg.get("timestamp", "")
+                })
+            else:
+                # Handle Message objects
+                conversation_history.append({
+                    "role": msg.role.value if hasattr(msg.role, 'value') else str(msg.role),
+                    "content": msg.content,
+                    "timestamp": ""
+                })
+        
         return {
-            "conversation_history": truncated_messages,
+            "conversation_history": conversation_history,
             "summary": session.summary,
             "context_summary": context_summary,
             "recent_messages": recent_messages,
@@ -612,6 +548,87 @@ Return ONLY the updated summary."""
         session.history = []
         for msg in messages:
             session.history.append((msg["role"], msg["content"]))
+    
+    def _truncate_with_summarization(
+        self, 
+        session: SmartSessionMemory, 
+        messages: List[Dict[str, str]], 
+        max_output_tokens: int
+    ) -> Tuple[List[Dict[str, str]], Dict[str, Any]]:
+        """Truncate conversation with summarization of older messages."""
+        try:
+            # First try normal truncation
+            truncated_messages, truncation_info = self.context_manager.truncate_conversation(
+                messages, max_output_tokens
+            )
+            
+            # If we removed a significant number of messages, try to summarize them
+            if truncation_info.get("messages_removed", 0) > 4:
+                logger.info(f"Attempting to summarize {truncation_info['messages_removed']} removed messages")
+                
+                # Get the removed messages (older ones)
+                removed_messages = messages[:len(messages) - len(truncated_messages)]
+                
+                if removed_messages:
+                    # Create a summary of the removed messages
+                    summary_text = self._create_conversation_summary(removed_messages)
+                    
+                    if summary_text:
+                        # Add summary as a system message at the beginning
+                        summary_message = {
+                            "role": "system",
+                            "content": f"CONVERSATION SUMMARY: {summary_text}\n\nUse this summary to maintain context and continuity in your response."
+                        }
+                        
+                        # Insert summary at the beginning of truncated messages
+                        truncated_messages.insert(0, summary_message)
+                        
+                        # Update session summary
+                        session.summary = summary_text
+                        
+                        truncation_info["summarized"] = True
+                        truncation_info["summary_length"] = len(summary_text)
+                        logger.info(f"Created conversation summary: {len(summary_text)} characters")
+            
+            return truncated_messages, truncation_info
+            
+        except Exception as e:
+            logger.warning(f"Summarization failed, using normal truncation: {e}")
+            # Fallback to normal truncation
+            return self.context_manager.truncate_conversation(messages, max_output_tokens)
+    
+    def _create_conversation_summary(self, messages: List[Dict[str, str]]) -> str:
+        """Create a summary of the given messages."""
+        try:
+            if not messages:
+                return ""
+            
+            # Extract conversation text
+            conversation_text = []
+            for msg in messages:
+                role = msg.get("role", "user")
+                content = msg.get("content", "")
+                if content:
+                    conversation_text.append(f"{role}: {content}")
+            
+            if not conversation_text:
+                return ""
+            
+            # Create a simple summary
+            full_conversation = "\n".join(conversation_text)
+            
+            # Truncate if too long for summary
+            if len(full_conversation) > 1000:
+                full_conversation = full_conversation[:1000] + "..."
+            
+            # Create a basic summary
+            summary = f"Previous conversation covered: {full_conversation[:500]}..."
+            
+            return summary
+            
+        except Exception as e:
+            logger.warning(f"Failed to create conversation summary: {e}")
+            return ""
     
 
 

@@ -9,7 +9,6 @@ from loguru import logger
 class QueryType(Enum):
     """Types of queries that determine response strategy."""
     SIMPLE_DEFINITION = "simple_definition"
-    COMPLEX_EXPLANATION = "complex_explanation"
     DETAILED_REQUEST = "detailed_request"
     FOLLOW_UP = "follow_up"
     COMPARISON = "comparison"
@@ -142,7 +141,7 @@ class QueryClassifier:
         # Check if user is providing detailed content themselves
         if self._is_user_detailed_content(query_lower):
             logger.debug("Classified as user-provided detailed content")
-            return QueryType.COMPLEX_EXPLANATION, ResponseLength.MEDIUM
+            return QueryType.DETAILED_REQUEST, ResponseLength.MEDIUM
         
         # Check for explicit detailed requests
         if self._is_detailed_request(query_lower):
@@ -180,8 +179,8 @@ class QueryClassifier:
         
         # Check if topic is inherently complex
         if self._is_complex_topic(query_lower):
-            logger.debug("Classified as complex explanation")
-            return QueryType.COMPLEX_EXPLANATION, ResponseLength.MEDIUM
+            logger.debug("Classified as complex topic")
+            return QueryType.DETAILED_REQUEST, ResponseLength.MEDIUM
         
         # Default to SHORT for most queries - users can ask for elaboration
         logger.debug("Classified as simple explanation")

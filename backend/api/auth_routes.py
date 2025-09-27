@@ -72,6 +72,32 @@ async def login_user(user_credentials: UserLogin):
         )
 
 
+@router.post("/refresh", response_model=Token)
+async def refresh_token(current_user: User = Depends(get_current_active_user)):
+    """Refresh access token for current user."""
+    try:
+        # Create new access token
+        access_token_expires = timedelta(minutes=settings.access_token_expire_minutes)
+        access_token = user_model.create_access_token(
+            data={"sub": current_user.id}, expires_delta=access_token_expires
+        )
+        
+        logger.info(f"Token refreshed for user: {current_user.email}")
+        
+        return Token(
+            access_token=access_token,
+            token_type="bearer",
+            expires_in=settings.access_token_expire_minutes * 60
+        )
+        
+    except Exception as e:
+        logger.error(f"Token refresh error: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Token refresh failed"
+        )
+
+
 @router.get("/me", response_model=User)
 async def get_current_user_info(current_user: User = Depends(get_current_active_user)):
     """Get current user information."""

@@ -12,6 +12,7 @@ export interface ChatSession {
   lastActivity: string;
   isActive: boolean;
   messageCount?: number; // Add message count from backend
+  isSummarizing?: boolean; // Whether context is being summarized
 }
 
 export interface ChatResponse {
@@ -21,6 +22,8 @@ export interface ChatResponse {
   can_request_detailed: boolean;
   guardrail_triggered: boolean;
   guardrail_reason?: string;
+  message_count?: number;
+  summarization_triggered?: boolean;
   timestamp: string;
 }
 

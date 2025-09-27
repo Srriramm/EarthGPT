@@ -3,16 +3,21 @@
 import re
 from typing import List, Tuple, Optional
 from loguru import logger
-from models.schemas import GuardrailCheck
-from config import settings
+
+from .base import BaseGuardrails
+from .models import GuardrailCheck
+from .config import GuardrailsConfig
 
 
-class SustainabilityGuardrails:
+class SustainabilityGuardrails(BaseGuardrails):
     """Guardrails system to ensure only sustainability-related queries are processed."""
     
-    def __init__(self):
+    def __init__(self, config: GuardrailsConfig = None):
+        """Initialize sustainability guardrails."""
+        super().__init__()
+        self.config = config or GuardrailsConfig()
         self.sustainability_keywords = set(
-            keyword.lower() for keyword in settings.sustainability_keywords
+            keyword.lower() for keyword in self.config.sustainability_keywords
         )
         self.negative_patterns = [
             r'\b(?:politics|political)\b(?!\s+(?:climate|environmental|sustainability|green))',
@@ -38,14 +43,15 @@ class SustainabilityGuardrails:
             re.compile(pattern, re.IGNORECASE) for pattern in self.negative_patterns
         ]
         
-        logger.info(f"Guardrails initialized with {len(self.sustainability_keywords)} sustainability keywords")
+        logger.info(f"Sustainability guardrails initialized with {len(self.sustainability_keywords)} sustainability keywords")
     
-    def check_sustainability_relevance(self, query: str) -> GuardrailCheck:
+    def check_sustainability_relevance(self, query: str, conversation_context: str = None) -> GuardrailCheck:
         """
         Check if the query is sustainability-related with strict validation.
         
         Args:
             query: User input query
+            conversation_context: Previous conversation context (unused in basic implementation)
             
         Returns:
             GuardrailCheck with validation results
@@ -361,3 +367,4 @@ class SustainabilityGuardrails:
         
         # Return a random polite message (in production, you might want to rotate these)
         return refusal_messages[0]
+

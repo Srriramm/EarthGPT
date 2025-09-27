@@ -1,7 +1,7 @@
 """LLM service for handling Claude API integration with token management."""
 
 import os
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 from anthropic import Anthropic
 from loguru import logger
 from models.schemas import Message, MessageRole
@@ -75,7 +75,7 @@ class LLMService:
         
         try:
             # Format messages for Claude API
-            formatted_messages = self._format_messages_for_claude(messages)
+            formatted_messages, system_prompt = self._format_messages_for_claude(messages)
             
             # Calculate token usage and validate request
             expected_output_tokens = max_tokens or settings.max_tokens
@@ -113,19 +113,24 @@ class LLMService:
             if formatted_messages:
                 first_msg = formatted_messages[0]
                 logger.info(f"LLM Service: First message role: {first_msg.get('role', 'unknown')}")
-                if first_msg.get('role') == 'system':
-                    logger.info(f"LLM Service: System prompt present, length: {len(first_msg.get('content', ''))}")
-                elif first_msg.get('role') == 'user' and 'EarthGPT' in first_msg.get('content', ''):
-                    logger.info(f"LLM Service: System prompt embedded in user message, length: {len(first_msg.get('content', ''))}")
+                if system_prompt:
+                    logger.info(f"LLM Service: System prompt present, length: {len(system_prompt)}")
                 else:
-                    logger.warning(f"LLM Service: No system prompt found! First message: {first_msg}")
+                    logger.warning(f"LLM Service: No system prompt found!")
             
-            response = self.client.messages.create(
-                model=self.model_name,
-                max_tokens=response_tokens,
-                temperature=temperature or settings.temperature,
-                messages=formatted_messages
-            )
+            # Prepare API parameters
+            api_params = {
+                "model": self.model_name,
+                "max_tokens": response_tokens,
+                "temperature": temperature or settings.temperature,
+                "messages": formatted_messages
+            }
+            
+            # Add system prompt if available
+            if system_prompt:
+                api_params["system"] = system_prompt
+            
+            response = self.client.messages.create(**api_params)
             
             # Extract text from response
             if response.content and len(response.content) > 0:
@@ -169,7 +174,7 @@ class LLMService:
                     "usage_info": {}
                 }
     
-    def _format_messages_for_claude(self, messages: List[Message]) -> List[Dict[str, str]]:
+    def _format_messages_for_claude(self, messages: List[Message]) -> Tuple[List[Dict[str, str]], str]:
         """Format messages for Claude messages API with sustainability focus."""
         formatted_messages = []
         system_prompt = None
@@ -205,41 +210,35 @@ CRITICAL RULES - NEVER VIOLATE THESE:
 4. RESPONSE LENGTH:
    - SHORT: 1-2 sentences + offer to elaborate
    - MEDIUM: 1-2 paragraphs + offer to elaborate
-   - DETAILED: Comprehensive response when explicitly requested - use natural, conversational tone and format that best serves the content
+   - DETAILED: Comprehensive response when explicitly requested - use the most appropriate format for the content
 
 NEVER provide advice on gambling, poker, sports, entertainment, personal finance, general business, health, relationships, lifestyle topics, diet, nutrition, bodybuilding, muscle, fitness, workout, exercise, gym, training, or ANY non-sustainability topic. If you see words like "poker", "gambling", "sports", "entertainment", "dating", "cooking", "travel", "health", "programming", "education", "diet", "nutrition", "bodybuilding", "muscle", "fitness", "workout", "exercise", "gym", "training" (without sustainability context), refuse immediately.
 
-RESPONSE FLEXIBILITY: When providing detailed responses, adapt your format and style to what best serves the content and user's needs. You may use flowing paragraphs, bullet points, headings, or any other format that makes the information most accessible and engaging. Avoid rigid academic structures unless specifically requested.
+RESPONSE STYLE: Respond in a natural, conversational way that feels like you're having a friendly discussion. Use flowing paragraphs and natural language. Only use structured formatting (bullet points, headings, lists) when the user specifically requests it or when it's clearly the most natural way to present the information. Otherwise, write like you're talking to a friend about sustainability topics.
 
 INTELLIGENT ENDINGS: End responses naturally when the topic is fully covered. Only offer follow-up suggestions when there are genuinely interesting related aspects to explore. Avoid generic "would you like me to elaborate" endings - instead, suggest specific, contextual follow-ups like "If you're interested in the environmental impact, I can discuss the marine ecosystem effects" or simply end naturally when the response is complete.
 
-NATURAL CONVERSATION: Prioritize natural, conversational flow over rigid academic formatting. If a user provides a detailed explanation or analysis, respond in a way that builds on their input naturally rather than defaulting to formal academic structures. Match the user's communication style when appropriate.
+NATURAL CONVERSATION: Write like you're having a conversation, not writing a formal document. Use natural language, flowing paragraphs, and a conversational tone. Match the user's communication style and respond as if you're talking to them directly.
 
 USER INPUT RECOGNITION: If a user provides a comprehensive analysis, detailed explanation, or structured information, acknowledge their contribution and build upon it conversationally rather than providing a completely separate, formal response. This creates a more natural dialogue flow.
 
 ELABORATION REQUESTS: When a user asks to "elaborate," "explain more," or requests additional details, provide a natural, flowing response that expands on the previous topic. Use flowing paragraphs and natural language rather than bullet points or structured lists unless the content specifically benefits from that format. Focus on depth and comprehensive coverage in a conversational style."""
         
-        # Convert messages to Claude format, prepending system prompt to first user message
-        first_user_message = True
+        # Convert messages to Claude format, properly handling system messages
         for message in messages:
             if message.role == MessageRole.USER:
-                content = message.content
-                if first_user_message and system_prompt:
-                    # Prepend system prompt to first user message for older API versions
-                    content = f"{system_prompt}\n\n{content}"
-                    first_user_message = False
                 formatted_messages.append({
                     "role": "user",
-                    "content": content
+                    "content": message.content
                 })
             elif message.role == MessageRole.ASSISTANT:
                 formatted_messages.append({
                     "role": "assistant",
                     "content": message.content
                 })
-            # Skip system messages as they're handled above
+            # Skip system messages as they're handled separately
         
-        return formatted_messages
+        return formatted_messages, system_prompt
     
     def generate_response_simple(
         self, 

@@ -241,11 +241,25 @@ class HybridMemoryManager:
             query_embedding = self.embedding_model.encode(query).tolist()
             
             # Build Pinecone filter
-            filter_dict = {"user_id": {"$eq": user_id}}
-            if session_id:
-                filter_dict["session_id"] = {"$eq": session_id}
+            # For authenticated users, also search for messages with "default" user_id in the same session
+            # This handles cases where the session was created anonymously and then user logged in
+            if user_id != "default" and session_id:
+                filter_dict = {
+                    "$or": [
+                        {"user_id": {"$eq": user_id}},
+                        {"user_id": {"$eq": "default"}}
+                    ],
+                    "session_id": {"$eq": session_id}
+                }
+            else:
+                filter_dict = {"user_id": {"$eq": user_id}}
+                if session_id:
+                    filter_dict["session_id"] = {"$eq": session_id}
+            
             if role_filter:
                 filter_dict["role"] = {"$eq": role_filter}
+            
+            logger.info(f"Semantic search filter: user_id={user_id}, session_id={session_id}, role_filter={role_filter}")
             
             # Search in Pinecone
             results = self.index.query(
