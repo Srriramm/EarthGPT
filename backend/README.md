@@ -307,71 +307,71 @@ optimized_context = smart_memory.build_context(
 ```mermaid
 graph TB
     %% User Input
-    User[👤 User Query] --> API[🌐 API Routes<br/>api/routes.py]
+    User[User Query] --> API[API Routes]
     
     %% API Layer
-    API --> Auth{🔐 Authenticated?}
-    Auth -->|Yes| AuthCheck[🔑 Auth Dependencies<br/>auth/dependencies.py]
-    Auth -->|No| SessionMgt[📝 Session Management<br/>MongoDB]
+    API --> Auth{Authenticated?}
+    Auth -->|Yes| AuthCheck[Auth Dependencies]
+    Auth -->|No| SessionMgt[Session Management]
     AuthCheck --> SessionMgt
     
     %% Session Management
-    SessionMgt --> SmartMem[🧠 Smart Memory<br/>core/smart_memory.py]
-    SmartMem --> AddMsg[➕ Add User Message<br/>to Session Memory]
+    SessionMgt --> SmartMem[Smart Memory]
+    SmartMem --> AddMsg[Add User Message]
     
     %% Guardrail System
-    AddMsg --> Guardrails[🛡️ Hybrid Guardrails<br/>guardrails/hybrid_classifier_guardrails.py]
-    Guardrails --> EmbedClass[📊 Embedding Classification<br/>Layer 1: SentenceTransformer]
+    AddMsg --> Guardrails[Hybrid Guardrails]
+    Guardrails --> EmbedClass[Embedding Classification]
     
-    EmbedClass --> Certain{✅ Certain?}
-    Certain -->|Yes| FollowUp[🔄 Follow-up Detection<br/>Two-Layer System]
-    Certain -->|No| LLMClass[🤖 LLM Classification<br/>Layer 2: Claude 3.5 Haiku]
+    EmbedClass --> Certain{Certain?}
+    Certain -->|Yes| FollowUp[Follow-up Detection]
+    Certain -->|No| LLMClass[LLM Classification]
     
     LLMClass --> FollowUp
-    FollowUp --> Decision{🎯 Allow Query?}
-    Decision -->|No| Reject[❌ Reject Response]
-    Decision -->|Yes| ContextRetrieval[📚 Context Retrieval]
+    FollowUp --> Decision{Allow Query?}
+    Decision -->|No| Reject[Reject Response]
+    Decision -->|Yes| ContextRetrieval[Context Retrieval]
     
     %% Context Management
-    ContextRetrieval --> RecentCtx[📋 Recent Context<br/>Last 6 Messages<br/>Smart Memory]
-    ContextRetrieval --> HybridMem[💾 Hybrid Memory<br/>core/hybrid_memory.py]
+    ContextRetrieval --> RecentCtx[Recent Context]
+    ContextRetrieval --> HybridMem[Hybrid Memory]
     
-    HybridMem --> SemanticSearch[🔍 Semantic Search<br/>Multi-Query Strategy]
-    SemanticSearch --> MongoDB[(🗄️ MongoDB<br/>Message Storage)]
-    SemanticSearch --> Pinecone[(🔍 Pinecone<br/>Vector Search)]
+    HybridMem --> SemanticSearch[Semantic Search]
+    SemanticSearch --> MongoDB[(MongoDB)]
+    SemanticSearch --> Pinecone[(Pinecone)]
     
-    MongoDB --> RelevantMsgs[📄 Relevant Old Messages<br/>Cross-Session Memory]
+    MongoDB --> RelevantMsgs[Relevant Old Messages]
     Pinecone --> RelevantMsgs
     
-    RecentCtx --> ContextAssembly[🔧 Context Assembly<br/>Smart Memory]
+    RecentCtx --> ContextAssembly[Context Assembly]
     RelevantMsgs --> ContextAssembly
     
     %% Prompt Engineering
-    ContextAssembly --> PromptEng[📝 Prompt Engineering<br/>core/prompt_engineering.py]
-    PromptEng --> SystemPrompt[🎭 System Prompt<br/>EarthGPT Persona]
-    PromptEng --> ContextPrompt[📖 Context Integration<br/>Recent + Historical]
-    PromptEng --> LengthControl[📏 Length Control<br/>"in short" vs "detailed"]
+    ContextAssembly --> PromptEng[Prompt Engineering]
+    PromptEng --> SystemPrompt[System Prompt]
+    PromptEng --> ContextPrompt[Context Integration]
+    PromptEng --> LengthControl[Length Control]
     
     %% LLM Generation
-    SystemPrompt --> LLMService[🤖 LLM Service<br/>services/llm_service.py]
+    SystemPrompt --> LLMService[LLM Service]
     ContextPrompt --> LLMService
     LengthControl --> LLMService
     
-    LLMService --> TokenMgr[🔢 Token Manager<br/>core/token_manager.py]
-    TokenMgr --> Claude37[🧠 Claude 3.7 Sonnet<br/>Main Response Generation]
-    Claude37 --> Response[💬 Generated Response]
+    LLMService --> TokenMgr[Token Manager]
+    TokenMgr --> Claude37[Claude 3.7 Sonnet]
+    Claude37 --> Response[Generated Response]
     
     %% Output Validation
-    Response --> OutputVal[✅ Output Validation<br/>guardrails/intelligent_output_validator.py]
-    OutputVal --> SemanticVal[🔍 Semantic Validation<br/>Sentence Transformers]
-    SemanticVal --> Valid{✅ Valid Response?}
+    Response --> OutputVal[Output Validation]
+    OutputVal --> SemanticVal[Semantic Validation]
+    SemanticVal --> Valid{Valid Response?}
     
     Valid -->|No| Reject
-    Valid -->|Yes| FormatResponse[📤 Format Response]
+    Valid -->|Yes| FormatResponse[Format Response]
     
     %% Memory Storage
-    FormatResponse --> StoreUser[💾 Store User Message<br/>Hybrid Memory]
-    FormatResponse --> StoreAssistant[💾 Store Assistant Response<br/>Hybrid Memory]
+    FormatResponse --> StoreUser[Store User Message]
+    FormatResponse --> StoreAssistant[Store Assistant Response]
     
     StoreUser --> MongoDB
     StoreUser --> Pinecone
@@ -379,13 +379,13 @@ graph TB
     StoreAssistant --> Pinecone
     
     %% Title Generation
-    FormatResponse --> TitleGen[📝 Title Generator<br/>core/title_generator.py]
-    TitleGen --> TitleCheck{📊 3+ Messages?}
-    TitleCheck -->|Yes| GenerateTitle[🏷️ Generate Title]
-    TitleCheck -->|No| SkipTitle[⏭️ Skip Title]
+    FormatResponse --> TitleGen[Title Generator]
+    TitleGen --> TitleCheck{3 or More Messages?}
+    TitleCheck -->|Yes| GenerateTitle[Generate Title]
+    TitleCheck -->|No| SkipTitle[Skip Title]
     
     %% Response to User
-    FormatResponse --> UserResponse[👤 Response to User]
+    FormatResponse --> UserResponse[Response to User]
     
     %% Styling
     classDef userClass fill:#e1f5fe,stroke:#01579b,stroke-width:2px
