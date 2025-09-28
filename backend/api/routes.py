@@ -12,7 +12,7 @@ from models.schemas import (
     HealthResponse, ErrorResponse, Message, MessageRole,
     ConversationRequestWithUser, ConversationResponseWithUser
 )
-from guardrails import TwoLevelGuardrails
+from guardrails import HybridClassifierGuardrails
 from core.smart_memory import smart_memory_manager
 from core.hybrid_memory import get_hybrid_memory_manager
 from core.prompt_engineering import PromptManager
@@ -25,7 +25,7 @@ from models.user import chat_session_model
 from config import settings
 
 # Initialize components
-guardrails = TwoLevelGuardrails()
+guardrails = HybridClassifierGuardrails()
 smart_memory = smart_memory_manager
 prompt_manager = PromptManager()
 title_generator = TitleGenerator()
@@ -90,8 +90,11 @@ async def chat(request: ConversationRequest, background_tasks: BackgroundTasks):
         
         logger.info(f"Processing chat request for session: {session_id}")
         
-        # Step 1: Get conversation context for guardrail check
-        context = smart_memory.get_optimized_context(session_id, request.message, "default")
+        # Step 1: Add current user message to memory FIRST for proper context
+        smart_memory.add_message_with_token_tracking(session_id, "user", request.message, "default")
+        
+        # Step 2: Get conversation context for guardrail check (now includes current message)
+        context = await smart_memory.get_optimized_context(session_id, request.message, "default")
         conversation_context = ""
         if context.get('conversation_history'):
             # Extract recent conversation for context
@@ -106,8 +109,12 @@ async def chat(request: ConversationRequest, background_tasks: BackgroundTasks):
             refusal_message = guardrails.get_polite_refusal_message(guardrail_result.rejection_reason)
             
             # Store the out-of-domain interaction in memory
+            # Add assistant response (user message already added at the beginning)
+            smart_memory.add_message_with_token_tracking(session_id, "assistant", refusal_message, "default")
+            
             try:
                 hybrid_memory = get_hybrid_memory_manager()
+                # User message already in smart memory, store both in hybrid memory
                 user_msg_id = await hybrid_memory.store_message("default", session_id, "user", request.message)
                 assistant_msg_id = await hybrid_memory.store_message("default", session_id, "assistant", refusal_message)
                 logger.info(f"Stored out-of-domain messages in hybrid memory - User: {user_msg_id}, Assistant: {assistant_msg_id}")
@@ -162,7 +169,7 @@ async def chat(request: ConversationRequest, background_tasks: BackgroundTasks):
             logger.warning(f"LLM error: {llm_result['error']}")
             if llm_result["error"] == "context_window_exceeded":
                 # Try to get a more focused response
-                context = smart_memory.get_optimized_context(session_id, request.message, "default", max_output_tokens=1000)
+                context = await smart_memory.get_optimized_context(session_id, request.message, "default", max_output_tokens=1000)
                 messages = prompt_manager.create_conversation_prompt(
                     request.message, 
                     context, 
@@ -174,7 +181,9 @@ async def chat(request: ConversationRequest, background_tasks: BackgroundTasks):
         response_text = llm_result.get("response", "I'm sorry, I couldn't generate a response.")
         
         # Step 6: Validate output with guardrails
-        is_valid, rejection_reason = guardrails.validate_output(response_text)
+        # Pass input classification score for intelligent output validation
+        input_classification_score = getattr(guardrail_result, 'confidence_score', None) if guardrail_result else None
+        is_valid, rejection_reason = guardrails.validate_output(response_text, request.message, input_classification_score)
         
         if not is_valid:
             logger.warning(f"Output validation failed: {rejection_reason}")
@@ -193,8 +202,8 @@ async def chat(request: ConversationRequest, background_tasks: BackgroundTasks):
         except Exception as e:
             logger.warning(f"Failed to check session info for title generation: {e}")
         
-        # Step 7.1: Add messages to conversation history with token tracking
-        smart_memory.add_message_with_token_tracking(session_id, "user", request.message, "default")
+        # Step 7.1: Add assistant response to conversation history with token tracking
+        # (User message already added at the beginning for proper context)
         smart_memory.add_message_with_token_tracking(session_id, "assistant", response_text, "default")
         
         # Step 7.2: Auto-generate title if this was the first user message
@@ -214,13 +223,14 @@ async def chat(request: ConversationRequest, background_tasks: BackgroundTasks):
         try:
             hybrid_memory = get_hybrid_memory_manager()
             logger.info(f"Hybrid memory manager type: {type(hybrid_memory)}")
+            # User message already stored in smart memory, now store in hybrid memory too
             user_msg_id = await hybrid_memory.store_message("default", session_id, "user", request.message)
             assistant_msg_id = await hybrid_memory.store_message("default", session_id, "assistant", response_text)
             logger.info(f"Stored messages in hybrid memory - User: {user_msg_id}, Assistant: {assistant_msg_id}")
         except Exception as e:
             logger.error(f"Failed to store messages in hybrid memory: {e}")
             logger.error(f"Hybrid memory error details: {type(e).__name__}: {str(e)}")
-            # Fallback to hybrid memory only
+            # Fallback to smart memory only
             logger.warning("Hybrid memory storage failed, messages stored in smart memory only")
         
         # Step 8.1: Update MongoDB session last_activity and sync message count
@@ -347,8 +357,11 @@ async def chat_authenticated(
                 session.user_id = current_user.id
                 logger.info(f"Updated session {session_id} user_id from 'default' to {current_user.id}")
         
-        # Step 1: Get conversation context for guardrail check
-        context = smart_memory.get_optimized_context(session_id, request.message, current_user.id)
+        # Step 1: Add current user message to memory FIRST for proper context
+        smart_memory.add_message_with_token_tracking(session_id, "user", request.message, current_user.id)
+        
+        # Step 2: Get conversation context for guardrail check (now includes current message)
+        context = await smart_memory.get_optimized_context(session_id, request.message, current_user.id)
         conversation_context = ""
         if context.get('conversation_history'):
             # Extract recent conversation for context
@@ -363,8 +376,12 @@ async def chat_authenticated(
             refusal_message = guardrails.get_polite_refusal_message(guardrail_result.rejection_reason)
             
             # Store the out-of-domain interaction in memory
+            # Add assistant response (user message already added at the beginning)
+            smart_memory.add_message_with_token_tracking(session_id, "assistant", refusal_message, current_user.id)
+            
             try:
                 hybrid_memory = get_hybrid_memory_manager()
+                # User message already in smart memory, store both in hybrid memory
                 user_msg_id = await hybrid_memory.store_message(current_user.id, session_id, "user", request.message)
                 assistant_msg_id = await hybrid_memory.store_message(current_user.id, session_id, "assistant", refusal_message)
                 logger.info(f"Stored authenticated out-of-domain messages in hybrid memory - User: {user_msg_id}, Assistant: {assistant_msg_id}")
@@ -428,7 +445,7 @@ async def chat_authenticated(
             logger.warning(f"LLM error: {llm_result['error']}")
             if llm_result["error"] == "context_window_exceeded":
                 # Try to get a more focused response
-                context = smart_memory.get_optimized_context(session_id, request.message, current_user.id, max_output_tokens=1000)
+                context = await smart_memory.get_optimized_context(session_id, request.message, current_user.id, max_output_tokens=1000)
                 messages = prompt_manager.create_conversation_prompt(
                     request.message, 
                     context, 
@@ -440,7 +457,9 @@ async def chat_authenticated(
         response_text = llm_result.get("response", "I'm sorry, I couldn't generate a response.")
         
         # Step 6: Validate output with guardrails
-        is_valid, rejection_reason = guardrails.validate_output(response_text)
+        # Pass input classification score for intelligent output validation
+        input_classification_score = getattr(guardrail_result, 'confidence_score', None) if guardrail_result else None
+        is_valid, rejection_reason = guardrails.validate_output(response_text, request.message, input_classification_score)
         if not is_valid:
             # Return generic refusal if output validation fails
             refusal_message = "I apologize, but I can only provide information related to sustainability topics. How can I help you with environmental, climate, or sustainability questions?"
@@ -478,8 +497,8 @@ async def chat_authenticated(
         except Exception as e:
             logger.warning(f"Failed to check session info for title generation: {e}")
         
-        # Step 7.1: Add messages to conversation history with token tracking
-        user_memory_result = smart_memory.add_message_with_token_tracking(session_id, "user", request.message, current_user.id)
+        # Step 7.1: Add assistant response to conversation history with token tracking
+        # (User message already added at the beginning for proper context)
         assistant_memory_result = smart_memory.add_message_with_token_tracking(session_id, "assistant", response_text, current_user.id)
         
         # Check if summarization was triggered
@@ -502,13 +521,14 @@ async def chat_authenticated(
         try:
             hybrid_memory = get_hybrid_memory_manager()
             logger.info(f"Authenticated hybrid memory manager type: {type(hybrid_memory)}")
+            # User message already stored in smart memory, now store in hybrid memory too
             user_msg_id = await hybrid_memory.store_message(current_user.id, session_id, "user", request.message)
             assistant_msg_id = await hybrid_memory.store_message(current_user.id, session_id, "assistant", response_text)
             logger.info(f"Stored authenticated messages in hybrid memory - User: {user_msg_id}, Assistant: {assistant_msg_id}")
         except Exception as e:
             logger.error(f"Failed to store authenticated messages in hybrid memory: {e}")
             logger.error(f"Authenticated hybrid memory error details: {type(e).__name__}: {str(e)}")
-            # Fallback to hybrid memory only
+            # Fallback to smart memory only
             logger.warning("Hybrid memory storage failed, messages stored in smart memory only")
         
         # Step 8.1: Update MongoDB session last_activity and sync message count

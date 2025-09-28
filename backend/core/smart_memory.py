@@ -442,7 +442,7 @@ Return ONLY the updated summary."""
             # Standard trimming
             session.trim(max_pairs=8)
     
-    def get_optimized_context(
+    async def get_optimized_context(
         self, 
         session_id: str, 
         query: str, 
@@ -485,10 +485,114 @@ Return ONLY the updated summary."""
         # Get recent messages for context
         recent_messages = session.recent_messages()
         
-        # Focus on maintaining chronological conversation flow
-        # Skip semantic search to avoid disrupting natural conversation context
+        # INTELLIGENT SEMANTIC SEARCH: Find relevant old messages
         relevant_documents = []
-        logger.info(f"Using chronological conversation history for session {session_id} - maintaining natural conversation flow")
+        try:
+            from .hybrid_memory import get_hybrid_memory_manager
+            hybrid_memory = get_hybrid_memory_manager()
+            
+            # Search for semantically similar messages from the full conversation history
+            # Extract key terms from the query for better semantic matching
+            search_queries = [query]  # Start with original query
+            
+            if "remember" in query.lower() or "told" in query.lower() or "mentioned" in query.lower():
+                # For memory-related queries, extract the key topic
+                import re
+                # Look for patterns like "about X", "regarding Y", "on Z"
+                key_terms = re.findall(r'(?:about|regarding|on|of)\s+([^,\.\?]+)', query.lower())
+                if key_terms:
+                    search_query = key_terms[0].strip()
+                    search_queries.append(search_query)
+                    logger.info(f"Extracted key term for search: '{search_query}' from query: '{query}'")
+                
+                # Also try searching for individual important words
+                important_words = re.findall(r'\b(?:rebound|effect|carbon|blockchain|transparency|sustainability|climate|energy|renewable|esg|emission|green|environmental)\b', query.lower())
+                for word in important_words:
+                    if word not in search_queries:
+                        search_queries.append(word)
+                        logger.info(f"Added important word for search: '{word}'")
+            
+            # Try multiple search queries to find relevant messages
+            all_similar_messages = []
+            for search_query in search_queries:
+                logger.info(f"Searching for similar messages with query: '{search_query}'")
+                similar_messages = await hybrid_memory.search_similar_messages(
+                    query=search_query,
+                    user_id=user_id,
+                    session_id=session_id,
+                    limit=15,  # Get more messages to ensure we find relevant ones
+                    role_filter="assistant"  # Focus on assistant responses for context
+                )
+                all_similar_messages.extend(similar_messages)
+            
+            # Remove duplicates and sort by similarity score
+            seen_contents = set()
+            similar_messages = []
+            for msg in all_similar_messages:
+                content = msg.get('content', '') if isinstance(msg, dict) else (msg[0] if isinstance(msg, tuple) and len(msg) > 0 else '')
+                if content and content not in seen_contents:
+                    seen_contents.add(content)
+                    similar_messages.append(msg)
+            
+            # Sort by similarity score (highest first)
+            similar_messages.sort(key=lambda x: x.get('similarity_score', 0) if isinstance(x, dict) else (x[2] if isinstance(x, tuple) and len(x) > 2 else 0), reverse=True)
+            similar_messages = similar_messages[:10]  # Keep top 10
+            logger.debug(f"Semantic search returned {len(similar_messages)} messages")
+            
+            # Filter out messages that are already in recent context to avoid duplication
+            recent_message_contents = []
+            for msg in recent_messages:
+                if isinstance(msg, dict):
+                    recent_message_contents.append(msg.get('content', ''))
+                elif isinstance(msg, tuple) and len(msg) >= 1:
+                    recent_message_contents.append(msg[0] if msg[0] else '')
+                else:
+                    logger.warning(f"Unexpected recent message format: {type(msg)} - {msg}")
+                    recent_message_contents.append('')
+            
+            for msg in similar_messages:
+                # Handle both dict and tuple formats from hybrid memory
+                if isinstance(msg, dict):
+                    content = msg.get('content', '')
+                    timestamp = msg.get('timestamp', '')
+                    score = msg.get('similarity_score', 0.0)
+                elif isinstance(msg, tuple) and len(msg) >= 3:
+                    # Handle tuple format: (content, timestamp, score)
+                    content, timestamp, score = msg[0], msg[1], msg[2]
+                else:
+                    logger.warning(f"Unexpected message format: {type(msg)} - {msg}")
+                    continue
+                
+                if content:
+                    # For follow-up questions, include relevant messages even if they're in recent context
+                    # This helps with questions like "Do you remember about X" or "Tell me more about Y"
+                    relevant_documents.append({
+                        'content': content,
+                        'timestamp': timestamp,
+                        'relevance_score': score
+                    })
+            
+            logger.info(f"Found {len(relevant_documents)} relevant old messages for query: '{query[:50]}...'")
+            
+            # Debug: Log the top relevant messages for troubleshooting
+            if relevant_documents:
+                logger.info(f"Top relevant messages for '{query[:30]}...':")
+                for i, doc in enumerate(relevant_documents[:5], 1):
+                    logger.info(f"  {i}. Score: {doc['relevance_score']:.3f} - {doc['content'][:150]}...")
+            else:
+                logger.warning(f"No relevant documents found for query: '{query[:50]}...'")
+            
+        except Exception as e:
+            logger.warning(f"Semantic search failed: {e}, continuing without old message context")
+            relevant_documents = []
+        
+        # CRITICAL FIX: Limit context to recent messages to prevent context pollution
+        # For long conversations, only use the most recent exchanges
+        max_context_messages = 6  # Last 3 user-assistant pairs
+        if len(truncated_messages) > max_context_messages:
+            # Keep only the most recent messages
+            truncated_messages = truncated_messages[-max_context_messages:]
+            logger.info(f"Limited context to recent {max_context_messages} messages for session {session_id} to prevent context pollution")
         
         logger.info(f"Using chronological conversation history for session {session_id}: {len(truncated_messages)} messages")
         

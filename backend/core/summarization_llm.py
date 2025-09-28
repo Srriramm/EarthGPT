@@ -12,7 +12,7 @@ class SummarizationLLMService:
     
     def __init__(self):
         self.api_key = os.getenv("ANTHROPIC_API_KEY") or settings.claude_api_key
-        self.model_name = settings.claude_model
+        self.model_name = settings.claude_summarization_model
         self.client = None
         self.is_loaded = False
         

@@ -19,14 +19,16 @@ class Settings(BaseSettings):
     max_tokens: int = 4096
     temperature: float = 0.7
     
+    # Specialized Claude Models
+    claude_summarization_model: str = "claude-3-5-haiku-20241022"
+    claude_classification_model: str = "claude-3-5-haiku-20241022"
+    
     # Database Configuration (MongoDB only)
     
     # MongoDB Configuration
     mongodb_url: str = "mongodb://localhost:27017"
     mongodb_database: str = "earthgpt"
     
-    # Vector Database Configuration
-    chroma_persist_directory: str = "./chroma_db"
     
     # Pinecone Configuration
     pinecone_api_key: str = Field(default="", alias="PINECONE_API_KEY")

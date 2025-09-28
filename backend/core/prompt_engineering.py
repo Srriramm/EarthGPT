@@ -10,13 +10,35 @@ class PromptTemplate:
     
     def __init__(self):
         
-        self.system_prompt = """You are EarthGPT, a sustainability expert focused on environmental topics, climate action, and sustainable practices.
+        self.system_prompt = """You are EarthGPT, a sustainability expert assistant. You provide accurate information on sustainability, environmental protection, climate action, and related topics.
 
-You ONLY answer questions related to environmental sustainability, including climate change, global warming, carbon emissions, renewable energy, clean technology, green innovation, biodiversity, ecosystems, conservation, wildlife protection, sustainable agriculture, forestry, fisheries, circular economy, recycling, waste reduction, resource efficiency, sustainable transport, green buildings, eco-friendly infrastructure, ESG (Environmental, Social, Governance), sustainable finance and green investment, environmental policy, SDGs, international climate agreements, water management, air quality, and pollution control.
+IMPORTANT: Questions reaching you have already been validated as sustainability-related by an advanced classification system. Trust this validation and provide helpful answers.
 
-If a question is NOT about sustainability, respond with: "I'm a sustainability expert focused only on environmental topics, climate action, and sustainable practices. I cannot answer that question. Please ask me something related to sustainability."
+CORE FUNCTION
+Answer questions about environmental science, climate solutions, sustainable practices, green technology, renewable energy, conservation, sustainability policy, ESG reporting, environmental frameworks, standards, certifications, and all related topics.
 
-For sustainability questions, provide natural, conversational responses that feel like you're having a friendly discussion. Use flowing paragraphs and natural language. Only use structured formatting (like bullet points or headings) when the user specifically asks for lists, components, or structured information. Otherwise, respond in a natural, conversational style that matches how people actually talk about these topics."""
+Include technical topics like:
+- Sustainability reporting frameworks (GRI, SASB, TCFD, CDP, etc.)
+- Environmental policies and regulations
+- Carbon accounting and emissions management
+- ESG investing and sustainable finance
+- Corporate sustainability practices
+- Environmental compliance and standards
+
+RESPONSE PROTOCOL
+For All Questions (pre-validated as sustainability-related):
+Provide direct, accurate answers using natural conversational language. If you're unfamiliar with a specific term or policy, acknowledge this but still attempt to provide context within the sustainability domain.
+
+QUALITY STANDARDS
+- Accuracy: Base responses on current scientific consensus
+- Precision: Answer exactly what was asked
+- Clarity: Use natural, conversational language
+- Completeness: Provide sufficient detail for the question's complexity
+
+RESPONSE LENGTH
+- Simple questions: Direct 1-2 sentence answers
+- Complex questions: Comprehensive paragraphs as needed
+Always prioritize precision over length"""
 
         logger.info("Prompt manager initialized")
     
@@ -50,8 +72,16 @@ For sustainability questions, provide natural, conversational responses that fee
         conversation_history = []
         if "conversation_history" in context:
             history = context["conversation_history"]
-            # Include full conversation history - token management will handle limits
-            recent_history = history
+            
+            # CRITICAL FIX: Limit conversation history to prevent context pollution
+            # Keep only the most recent conversation turns to avoid old topics influencing responses
+            max_history_items = 6  # Last 3 exchanges (user+assistant pairs)
+            if len(history) > max_history_items:
+                # Keep only the most recent exchanges
+                recent_history = history[-max_history_items:]
+                logger.info(f"Limited conversation history to {len(recent_history)} recent messages to prevent context pollution")
+            else:
+                recent_history = history
             
             # Convert new memory system format to Message objects
             for msg in recent_history:
@@ -83,12 +113,23 @@ For sustainability questions, provide natural, conversational responses that fee
             context_message = self._build_context_message(context["relevant_documents"])
             messages.append(context_message)
         
-        # Let the LLM decide the appropriate response style naturally
-        query_content = query
+        # CRITICAL: Current user query MUST be the last message for highest priority
+        # Parse user intent for response length and add clear instructions
+        query_lower = query.lower()
+        
+        # Detect user preference for response length
+        length_instruction = ""
+        if any(phrase in query_lower for phrase in ["in short", "briefly", "quick", "summary", "concise", "short"]):
+            length_instruction = "IMPORTANT: Provide a BRIEF, concise response (2-3 sentences maximum). "
+        elif any(phrase in query_lower for phrase in ["detailed", "comprehensive", "thorough", "in depth", "elaborate"]):
+            length_instruction = "IMPORTANT: Provide a detailed, comprehensive response. "
+        
+        # Add clear instruction and current query
+        current_query = f"{length_instruction}Current question: {query}"
         
         messages.append(Message(
             role=MessageRole.USER,
-            content=query_content
+            content=current_query
         ))
         
         return messages
@@ -97,26 +138,19 @@ For sustainability questions, provide natural, conversational responses that fee
         """Build a context message from relevant documents (including old conversation messages)."""
         context_parts = ["RELEVANT CONTEXT FROM THIS CONVERSATION:"]
         
-        for i, doc in enumerate(relevant_documents[:5], 1):  # Increased to top 5 documents
+        for i, doc in enumerate(relevant_documents[:5], 1):  # Top 5 most relevant old messages
             content = doc.get("content", "")
-            metadata = doc.get("metadata", {})
-            topic = metadata.get("topic", "general")
-            role = metadata.get("role", "unknown")
-            timestamp = metadata.get("timestamp", "")
-            similarity_score = metadata.get("similarity_score", 0)
+            timestamp = doc.get("timestamp", "")
+            relevance_score = doc.get("relevance_score", 0.0)
             
-            # Format based on whether it's from previous conversation or knowledge base
-            if topic == "previous_conversation":
-                role_label = "User" if role == "user" else "Assistant"
-                context_parts.append(f"\n{i}. Previous {role_label} message (relevance: {similarity_score:.2f}):")
-                if timestamp:
-                    context_parts.append(f"   (From earlier in this conversation)")
-            else:
-                context_parts.append(f"\n{i}. Topic: {topic} (relevance: {similarity_score:.2f})")
+            # Format for old conversation messages from semantic search
+            context_parts.append(f"\n{i}. Previous Assistant Response (relevance: {relevance_score:.2f}):")
+            if timestamp:
+                context_parts.append(f"   (From earlier in this conversation)")
             
             # Truncate content to keep context manageable
             truncated_content = content[:400] + "..." if len(content) > 400 else content
-            context_parts.append(f"   Content: {truncated_content}")
+            context_parts.append(f"   {truncated_content}")
         
         context_parts.append("\nUse this relevant context from this conversation to provide more accurate and contextual responses. Reference the relevant previous messages when appropriate.")
         
