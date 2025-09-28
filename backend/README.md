@@ -18,11 +18,32 @@ EarthGPT Backend is designed as a modular, scalable system that combines multipl
 ```
 backend/
 ├── api/                    # API endpoints and routing
+│   ├── routes.py          # Main chat endpoints
+│   └── auth_routes.py     # Authentication endpoints
 ├── auth/                   # Authentication and authorization
+│   └── dependencies.py    # Auth dependencies and middleware
 ├── core/                   # Core business logic and services
+│   ├── smart_memory.py    # Session memory and context management
+│   ├── hybrid_memory.py   # Persistent storage (MongoDB + Pinecone)
+│   ├── prompt_engineering.py # Prompt construction and optimization
+│   ├── classification_llm.py # LLM service for classification (Claude 3.5 Haiku)
+│   ├── summarization_llm.py # LLM service for summarization (Claude 3.5 Haiku)
+│   ├── title_generator.py # Conversation title generation
+│   └── token_manager.py   # Token counting and context window management
+├── database/               # Database connections and configuration
+│   └── mongodb.py         # MongoDB connection manager
 ├── guardrails/             # Content filtering and validation
+│   ├── __init__.py        # Guardrails module exports
+│   ├── base.py            # Base guardrails class
+│   ├── models.py          # Guardrail data models
+│   ├── hybrid_classifier_guardrails.py # Main guardrail system
+│   └── intelligent_output_validator.py # Response validation
+├── models/                 # Data models and schemas
+│   ├── schemas.py         # Pydantic models for API
+│   └── user.py            # User and session models
 ├── services/               # External service integrations
-├── models/                 # Database models and schemas
+│   └── llm_service.py     # Main LLM service (Claude 3.7 Sonnet)
+├── logs/                   # Application logs
 ├── config.py              # Application configuration
 ├── main.py                # FastAPI application entry point
 ├── requirements.txt       # Python dependencies
@@ -59,13 +80,21 @@ backend/
 - `GET /api/v1/health` - Health check
 
 **Flow**:
-1. **Input Validation**: Validates incoming chat requests
-2. **Session Management**: Creates or retrieves conversation sessions
+1. **Input Validation**: Validates incoming chat requests using Pydantic models
+2. **Session Management**: Creates or retrieves conversation sessions via MongoDB
 3. **Guardrail Check**: Validates sustainability relevance using hybrid classifier
 4. **Context Retrieval**: Gets optimized conversation context with semantic search
 5. **LLM Generation**: Generates response using Claude 3.7 Sonnet
 6. **Output Validation**: Validates response content and relevance
-7. **Memory Storage**: Stores conversation in hybrid memory system
+7. **Memory Storage**: Stores conversation in hybrid memory system (MongoDB + Pinecone)
+8. **Title Generation**: Generates conversation titles for long sessions
+
+#### `api/auth_routes.py`
+**Purpose**: Authentication and user management endpoints
+**Features**:
+- User registration and login
+- JWT token management
+- User session handling
 
 ### Authentication (`auth/`)
 
@@ -80,18 +109,18 @@ backend/
 ### Core Business Logic (`core/`)
 
 #### `core/smart_memory.py`
-**Purpose**: Intelligent conversation memory and context management
+**Purpose**: Session-based memory management and context optimization
 **Key Features**:
-- **Session Management**: Tracks conversation sessions and message history
+- **Session Management**: Tracks active conversation sessions in memory
 - **Token Optimization**: Manages context window limits and message truncation
-- **Semantic Search Integration**: Retrieves relevant old messages using hybrid memory
-- **Context Building**: Constructs optimized prompts with recent + relevant historical context
+- **Context Assembly**: Combines recent messages with relevant historical context
+- **Memory Integration**: Interfaces with hybrid memory for persistent storage
 
 **Flow**:
-1. **Message Storage**: Stores user/assistant messages with token tracking
-2. **Context Optimization**: Limits recent messages to prevent context pollution
-3. **Semantic Search**: Finds relevant old messages using multiple search strategies
-4. **Context Assembly**: Combines recent + relevant historical context
+1. **Message Storage**: Stores user/assistant messages in session memory
+2. **Context Optimization**: Limits recent messages to prevent context pollution (max 6 messages)
+3. **Semantic Search**: Retrieves relevant old messages via hybrid memory
+4. **Context Assembly**: Combines recent + relevant historical context for LLM
 
 #### `core/hybrid_memory.py`
 **Purpose**: Persistent memory storage using MongoDB + Pinecone
@@ -173,6 +202,7 @@ optimized_context = smart_memory.build_context(
 - **Fast Classification**: Optimized for quick YES/NO sustainability relevance decisions
 - **Cost-Effective**: Uses Haiku model for classification tasks
 - **Deterministic**: Low temperature (0.0) for consistent results
+- **Follow-up Detection**: Uses LLM for ambiguous follow-up question detection
 
 #### `core/summarization_llm.py`
 **Purpose**: LLM service for conversation summarization using Claude 3.5 Haiku
@@ -181,21 +211,36 @@ optimized_context = smart_memory.build_context(
 - **Context Compression**: Reduces token usage while preserving key information
 - **Incremental Updates**: Updates summaries as conversations progress
 
+#### `core/title_generator.py`
+**Purpose**: Generates conversation titles for long chat sessions
+**Features**:
+- **Automatic Title Generation**: Creates descriptive titles after 3+ messages
+- **Context-Aware**: Uses conversation content to generate relevant titles
+- **User-Friendly**: Helps users identify and manage conversations
+
+#### `core/token_manager.py`
+**Purpose**: Token counting and context window management
+**Features**:
+- **Token Counting**: Accurate token estimation for different models
+- **Context Window Management**: Optimizes context within model limits
+- **Message Truncation**: Intelligently truncates messages when needed
+
 ### Guardrails (`guardrails/`)
 
 #### `guardrails/hybrid_classifier_guardrails.py`
 **Purpose**: Advanced multi-layer content filtering system
 **Architecture**:
-1. **Layer 1 - Embedding Classification**: Fast semantic similarity against sustainability categories
+1. **Layer 1 - Embedding Classification**: Fast semantic similarity against sustainability categories using SentenceTransformer
 2. **Layer 2 - LLM Classification**: Claude 3.5 Haiku fallback for uncertain cases
-3. **Layer 3 - Follow-up Detection**: Two-layer system for conversation continuity
-4. **Layer 4 - Output Validation**: Intelligent response validation
+3. **Layer 3 - Follow-up Detection**: Two-layer system (pattern-based + LLM-based) for conversation continuity
+4. **Layer 4 - Output Validation**: Intelligent response validation using semantic similarity
 
 **Key Features**:
 - **Hybrid Approach**: Combines speed of embeddings with accuracy of LLM
 - **Two-Layer Follow-up Detection**: Pattern-based + LLM-based for conversation continuity
 - **Intelligent Output Validation**: Semantic similarity + context-aware thresholds
 - **Sustainability Categories**: Comprehensive environmental and sustainability topic coverage
+- **Multi-Query Search**: Uses multiple search strategies for better old message retrieval
 
 #### `guardrails/intelligent_output_validator.py`
 **Purpose**: Advanced response validation using semantic similarity
@@ -204,6 +249,18 @@ optimized_context = smart_memory.build_context(
 - **Adaptive Thresholds**: Adjusts validation strictness based on input confidence
 - **Technical Term Recognition**: Recognizes sustainability-specific terminology
 - **Graceful Fallbacks**: Falls back to basic validation if semantic validation fails
+
+#### `guardrails/base.py`
+**Purpose**: Base class for all guardrail implementations
+**Features**:
+- **Abstract Interface**: Defines common guardrail methods
+- **Consistent API**: Standardized interface for all guardrail types
+
+#### `guardrails/models.py`
+**Purpose**: Data models for guardrail system
+**Features**:
+- **GuardrailCheck**: Result model for guardrail decisions
+- **Type Safety**: Pydantic models for validation
 
 ### 🔌 Services (`services/`)
 
@@ -215,14 +272,33 @@ optimized_context = smart_memory.build_context(
 - **Error Handling**: Robust error handling and fallback mechanisms
 - **Performance Monitoring**: Tracks response times and token usage
 
+### Database (`database/`)
+
+#### `database/mongodb.py`
+**Purpose**: MongoDB connection and database management
+**Features**:
+- **Async Connection**: Motor-based async MongoDB client
+- **Connection Management**: Handles connection lifecycle
+- **Index Creation**: Automatic index creation for performance
+- **Error Handling**: Robust error handling and logging
+
 ### Models (`models/`)
 
-#### `models/chat.py`
+#### `models/schemas.py`
 **Purpose**: Pydantic models for API request/response validation
 **Key Models**:
-- `ChatRequest`: Input validation for chat messages
-- `ChatResponse`: Response formatting and metadata
+- `ConversationRequest`: Input validation for chat messages
+- `ConversationResponse`: Response formatting and metadata
 - `SessionInfo`: Session management and tracking
+- `Message`: Individual message structure
+- `User`: User authentication and profile data
+
+#### `models/user.py`
+**Purpose**: User and session data models
+**Features**:
+- **User Management**: User registration and authentication
+- **Session Models**: Chat session tracking and management
+- **Database Integration**: MongoDB collection definitions
 
 ## System Flow
 
@@ -236,16 +312,16 @@ graph TB
     %% API Layer
     API --> Auth{🔐 Authenticated?}
     Auth -->|Yes| AuthCheck[🔑 Auth Dependencies<br/>auth/dependencies.py]
-    Auth -->|No| SessionMgt[📝 Session Management]
+    Auth -->|No| SessionMgt[📝 Session Management<br/>MongoDB]
     AuthCheck --> SessionMgt
     
     %% Session Management
     SessionMgt --> SmartMem[🧠 Smart Memory<br/>core/smart_memory.py]
-    SmartMem --> AddMsg[➕ Add User Message<br/>to Session]
+    SmartMem --> AddMsg[➕ Add User Message<br/>to Session Memory]
     
     %% Guardrail System
     AddMsg --> Guardrails[🛡️ Hybrid Guardrails<br/>guardrails/hybrid_classifier_guardrails.py]
-    Guardrails --> EmbedClass[📊 Embedding Classification<br/>Layer 1: Fast Semantic Check]
+    Guardrails --> EmbedClass[📊 Embedding Classification<br/>Layer 1: SentenceTransformer]
     
     EmbedClass --> Certain{✅ Certain?}
     Certain -->|Yes| FollowUp[🔄 Follow-up Detection<br/>Two-Layer System]
@@ -257,11 +333,15 @@ graph TB
     Decision -->|Yes| ContextRetrieval[📚 Context Retrieval]
     
     %% Context Management
-    ContextRetrieval --> RecentCtx[📋 Recent Context<br/>Last 6 Messages]
+    ContextRetrieval --> RecentCtx[📋 Recent Context<br/>Last 6 Messages<br/>Smart Memory]
     ContextRetrieval --> HybridMem[💾 Hybrid Memory<br/>core/hybrid_memory.py]
     
-    HybridMem --> SemanticSearch[🔍 Semantic Search<br/>MongoDB + Pinecone]
-    SemanticSearch --> RelevantMsgs[📄 Relevant Old Messages<br/>Cross-Session Memory]
+    HybridMem --> SemanticSearch[🔍 Semantic Search<br/>Multi-Query Strategy]
+    SemanticSearch --> MongoDB[(🗄️ MongoDB<br/>Message Storage)]
+    SemanticSearch --> Pinecone[(🔍 Pinecone<br/>Vector Search)]
+    
+    MongoDB --> RelevantMsgs[📄 Relevant Old Messages<br/>Cross-Session Memory]
+    Pinecone --> RelevantMsgs
     
     RecentCtx --> ContextAssembly[🔧 Context Assembly<br/>Smart Memory]
     RelevantMsgs --> ContextAssembly
@@ -277,7 +357,8 @@ graph TB
     ContextPrompt --> LLMService
     LengthControl --> LLMService
     
-    LLMService --> Claude37[🧠 Claude 3.7 Sonnet<br/>Main Response Generation]
+    LLMService --> TokenMgr[🔢 Token Manager<br/>core/token_manager.py]
+    TokenMgr --> Claude37[🧠 Claude 3.7 Sonnet<br/>Main Response Generation]
     Claude37 --> Response[💬 Generated Response]
     
     %% Output Validation
@@ -292,11 +373,16 @@ graph TB
     FormatResponse --> StoreUser[💾 Store User Message<br/>Hybrid Memory]
     FormatResponse --> StoreAssistant[💾 Store Assistant Response<br/>Hybrid Memory]
     
-    StoreUser --> MongoDB[(🗄️ MongoDB<br/>Full Message Storage)]
-    StoreUser --> Pinecone[(🔍 Pinecone<br/>Vector Embeddings)]
-    
+    StoreUser --> MongoDB
+    StoreUser --> Pinecone
     StoreAssistant --> MongoDB
     StoreAssistant --> Pinecone
+    
+    %% Title Generation
+    FormatResponse --> TitleGen[📝 Title Generator<br/>core/title_generator.py]
+    TitleGen --> TitleCheck{📊 3+ Messages?}
+    TitleCheck -->|Yes| GenerateTitle[🏷️ Generate Title]
+    TitleCheck -->|No| SkipTitle[⏭️ Skip Title]
     
     %% Response to User
     FormatResponse --> UserResponse[👤 Response to User]
@@ -309,42 +395,65 @@ graph TB
     classDef memoryClass fill:#e3f2fd,stroke:#0d47a1,stroke-width:2px
     classDef llmClass fill:#fce4ec,stroke:#880e4f,stroke-width:2px
     classDef dbClass fill:#f1f8e9,stroke:#33691e,stroke-width:2px
+    classDef utilClass fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
     
     class User,UserResponse userClass
     class API,AuthCheck,SessionMgt apiClass
-    class SmartMem,PromptEng,ContextAssembly coreClass
+    class SmartMem,PromptEng,ContextAssembly,TokenMgr coreClass
     class Guardrails,EmbedClass,LLMClass,FollowUp,OutputVal,SemanticVal guardrailClass
     class HybridMem,SemanticSearch,RelevantMsgs,RecentCtx memoryClass
     class LLMService,Claude37 llmClass
     class MongoDB,Pinecone dbClass
+    class TitleGen,GenerateTitle,SkipTitle utilClass
 ```
 
 ### Detailed Flow Breakdown
 
 #### 1. **Request Processing Flow**
 ```
-User Query → API Route → Authentication Check → Session Management → Smart Memory
+User Query → API Route → Authentication Check → Session Management (MongoDB) → Smart Memory
 ```
 
 #### 2. **Content Filtering Flow**
 ```
-Query → Embedding Classification → LLM Classification (if uncertain) → Follow-up Detection → Decision
+Query → Embedding Classification (SentenceTransformer) → LLM Classification (Claude 3.5 Haiku) → Follow-up Detection (Two-Layer) → Decision
 ```
 
 #### 3. **Context Management Flow**
 ```
-Query → Recent Context Retrieval → Semantic Search → Context Assembly → Prompt Building
+Query → Recent Context (Smart Memory) → Semantic Search (Multi-Query) → MongoDB + Pinecone → Context Assembly → Prompt Building
 ```
 
 #### 4. **Response Generation Flow**
 ```
-Optimized Context → LLM Generation → Output Validation → Response Formatting → Memory Storage
+Optimized Context → Token Management → LLM Generation (Claude 3.7 Sonnet) → Output Validation → Response Formatting → Memory Storage
 ```
 
 #### 5. **Memory Storage Flow**
 ```
-Message → MongoDB Storage → Embedding Generation → Pinecone Storage → Hybrid Memory Complete
+Message → Hybrid Memory → MongoDB (Full Storage) + Pinecone (Vector Embeddings) → Title Generation (if 3+ messages)
 ```
+
+### Key System Components
+
+#### **Memory Architecture**
+- **Smart Memory**: Session-based, in-memory, manages recent context (last 6 messages)
+- **Hybrid Memory**: Persistent storage, MongoDB + Pinecone, cross-session semantic search
+
+#### **Guardrail System**
+- **Layer 1**: Embedding classification using SentenceTransformer
+- **Layer 2**: LLM classification using Claude 3.5 Haiku for uncertain cases
+- **Layer 3**: Two-layer follow-up detection (pattern-based + LLM-based)
+- **Layer 4**: Output validation using semantic similarity
+
+#### **LLM Integration**
+- **Claude 3.7 Sonnet**: Main response generation
+- **Claude 3.5 Haiku**: Classification and summarization tasks
+- **Token Management**: Context window optimization and message truncation
+
+#### **Database Systems**
+- **MongoDB**: Document storage for messages, sessions, and metadata
+- **Pinecone**: Vector database for semantic search and similarity matching
 
 ## Key Integrations
 
@@ -367,7 +476,6 @@ Message → MongoDB Storage → Embedding Generation → Pinecone Storage → Hy
 # Database
 MONGODB_URL=mongodb://localhost:27017
 PINECONE_API_KEY=your_pinecone_key
-PINECONE_ENVIRONMENT=your_pinecone_env
 
 # LLM Services
 ANTHROPIC_API_KEY=your_anthropic_key
@@ -375,16 +483,19 @@ ANTHROPIC_API_KEY=your_anthropic_key
 # Application
 SECRET_KEY=your_secret_key
 DEBUG=False
+ENVIRONMENT=development
 ```
 
 ### Dependencies
-- **FastAPI**: Web framework
-- **Pydantic**: Data validation and settings
+- **FastAPI**: Web framework and API routing
+- **Pydantic**: Data validation and settings management
 - **Motor**: Async MongoDB driver
-- **Pinecone**: Vector database client
-- **Anthropic**: Claude API client
-- **Sentence Transformers**: Embedding models
-- **NumPy**: Numerical computations
+- **Pinecone**: Vector database client for semantic search
+- **Anthropic**: Claude API client for LLM integration
+- **Sentence Transformers**: Local embedding generation
+- **NumPy**: Numerical computations for similarity calculations
+- **Loguru**: Advanced logging system
+- **Uvicorn**: ASGI server for FastAPI
 
 ## Getting Started
 
