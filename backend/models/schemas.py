@@ -31,10 +31,16 @@ class ConversationResponse(BaseModel):
     """Response model for chat conversation."""
     response: str
     session_id: str
+    is_sustainability_related: bool = True
+    confidence_score: float = 0.95
     is_summary: bool = False
     can_request_detailed: bool = False
     guardrail_triggered: bool = False
     guardrail_reason: Optional[str] = None
+    memory_used: bool = False
+    claude_memory_enabled: bool = True
+    web_search_enabled: bool = False
+    error: Optional[str] = None
     timestamp: datetime = Field(default_factory=datetime.utcnow)
 
 
@@ -55,6 +61,10 @@ class HealthResponse(BaseModel):
     model_loaded: bool
     guardrails_enabled: bool
     memory_system_active: bool
+    claude_memory_enabled: bool = True
+    web_search_enabled: bool = False
+    web_fetch_enabled: bool = False
+    memory_stats: Optional[Dict[str, Any]] = None
     
     model_config = {"protected_namespaces": ()}
 
@@ -155,10 +165,15 @@ class ConversationResponseWithUser(BaseModel):
     response: str
     session_id: str
     user_id: str
+    is_sustainability_related: bool = True
+    confidence_score: float = 0.95
     is_summary: bool = False
     can_request_detailed: bool = False
     guardrail_triggered: bool = False
     guardrail_reason: Optional[str] = None
-    message_count: int = 0  # Current message count for the session
-    summarization_triggered: bool = False  # Whether context summarization was triggered
+    memory_used: bool = False
+    claude_memory_enabled: bool = True
+    web_search_enabled: bool = False
+    error: Optional[str] = None
+    user: Optional[User] = None
     timestamp: datetime = Field(default_factory=datetime.utcnow)

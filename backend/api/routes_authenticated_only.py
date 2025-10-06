@@ -63,43 +63,11 @@ async def chat(
                 logger.warning(f"Session {session_id} does not belong to user {current_user.id}")
                 raise HTTPException(status_code=403, detail="Access denied")
         
-        # Step 1: Fast guardrail check for obvious non-sustainability queries
+        # Step 1: Guardrail check
         guardrail_result = None
         if settings.enable_guardrails:
             try:
-                # Fast path: Check for obvious non-sustainability keywords first
-                query_lower = request.message.lower()
-                obvious_non_sustainability = [
-                    "portfolio", "investment", "trading", "stock", "market", "finance",
-                    "cooking", "recipe", "food", "restaurant", "travel", "vacation",
-                    "health", "fitness", "exercise", "medical", "doctor", "medicine",
-                    "entertainment", "movie", "music", "game", "sports", "football",
-                    "programming", "code", "software", "app", "website", "database",
-                    "relationship", "dating", "marriage", "family", "personal"
-                ]
-                
-                # If query contains obvious non-sustainability terms, block immediately
-                if any(term in query_lower for term in obvious_non_sustainability):
-                    # Check if it's actually about sustainability (e.g., "sustainable finance")
-                    sustainability_indicators = ["sustainable", "green", "eco", "environmental", "climate", "carbon", "renewable", "esg"]
-                    if not any(indicator in query_lower for indicator in sustainability_indicators):
-                        logger.warning(f"Fast path: Non-sustainability query blocked: {request.message[:100]}...")
-                        return ConversationResponseWithUser(
-                            response="I'm specialized in sustainability topics. Please ask me about environmental issues, climate change, renewable energy, sustainable practices, or related topics.",
-                            session_id=session_id,
-                            user_id=current_user.id,
-                            is_sustainability_related=False,
-                            confidence_score=0.9,
-                            guardrail_triggered=True,
-                            guardrail_reason="Query appears to be about non-sustainability topics",
-                            memory_used=False,
-                            claude_memory_enabled=True,
-                            web_search_enabled=False,
-                            user=current_user
-                        )
-                
-                # Full guardrail check for uncertain cases
-                guardrail_result = guardrails.check_sustainability_relevance(request.message)
+                guardrail_result = await guardrails.check_sustainability_relevance(request.message)
                 if not guardrail_result.is_sustainability_related:
                     logger.warning(f"Non-sustainability query blocked: {request.message[:100]}...")
                     return ConversationResponseWithUser(
@@ -160,7 +128,7 @@ async def chat(
         session_data = await mongodb_memory.get_session_info(session_id)
         if session_data and session_data.get("message_count", 0) == 2:  # One user message + one assistant message
             try:
-                title = title_generator.generate_title(request.message)
+                title = await title_generator.generate_title(request.message, response_text)
                 if title and title != "New Chat":
                     await mongodb_memory.update_session_title(session_id, title)
                     logger.info(f"Generated title for session {session_id}: {title}")

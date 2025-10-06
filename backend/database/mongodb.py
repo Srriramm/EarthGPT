@@ -55,6 +55,18 @@ class MongoDB:
             messages_collection = self.database.chat_messages
             await messages_collection.create_index([("user_id", 1), ("session_id", 1), ("timestamp", -1)])
             
+            # Session metadata collection indexes
+            metadata_collection = self.database.session_metadata
+            await metadata_collection.create_index("session_id", unique=True)
+            await metadata_collection.create_index("user_id")
+            
+            # Chat memories collection indexes
+            memories_collection = self.database.chat_memories
+            await memories_collection.create_index("memory_id", unique=True)
+            await memories_collection.create_index("session_id")
+            await memories_collection.create_index([("session_id", 1), ("created_at", -1)])
+            await memories_collection.create_index([("content", "text")])  # Text search index
+            
             logger.info("Database indexes created successfully")
             
         except Exception as e:

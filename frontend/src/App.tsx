@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Toaster } from 'react-hot-toast';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useChat } from './hooks/useChat';
@@ -12,7 +12,6 @@ import AuthPage from './components/AuthPage';
 
 const App: React.FC = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const hasAttemptedInitialSession = useRef(false);
   const { isDarkMode, toggleTheme } = useTheme();
   const { isAuthenticated, isLoading: authLoading } = useAuth();
   const {
@@ -36,35 +35,38 @@ const App: React.FC = () => {
     return () => clearInterval(interval);
   }, [checkHealth]);
 
-  // Create initial session if none exist (only after loading is complete and we haven't already attempted this)
+  // Create initial session if none exist (only after loading is complete and user is authenticated)
   useEffect(() => {
-    // Only auto-create a session if:
-    // 1. Sessions have finished loading
-    // 2. No sessions exist
-    // 3. We haven't already attempted to create an initial session
-    // 4. User hasn't explicitly chosen to start with no sessions (check localStorage)
-    // 5. We're not in the middle of a page refresh (check if we have a current session)
-    const hasExplicitlyChosenNoSessions = localStorage.getItem('earthgpt-no-auto-session') === 'true';
-    const hasCurrentSession = currentSession !== null;
-    
-    console.log('useEffect triggered:', {
+    console.log('App.tsx useEffect triggered:', {
+      authLoading,
       isLoadingSessions,
+      isAuthenticated,
       sessionsLength: sessions.length,
-      hasAttempted: hasAttemptedInitialSession.current,
-      hasExplicitlyChosenNoSessions,
-      hasCurrentSession
+      currentSessionId: currentSession?.id
     });
     
-    if (!isLoadingSessions && sessions.length === 0 && !hasAttemptedInitialSession.current && !hasExplicitlyChosenNoSessions && !hasCurrentSession) {
-      console.log('Auto-creating initial session');
-      hasAttemptedInitialSession.current = true;
-      createNewSession();
+    // Wait for both auth loading and session loading to complete
+    if (authLoading || isLoadingSessions) {
+      console.log('Still loading auth or sessions, waiting...');
+      return;
     }
-  }, [isLoadingSessions, sessions.length, currentSession]);
+    
+    // Only create session if user is authenticated AND no sessions exist AND no current session
+    if (isAuthenticated && sessions.length === 0 && !currentSession) {
+      console.log('🚨 CREATING NEW SESSION - No sessions found for authenticated user');
+      createNewSession();
+    } else if (sessions.length > 0) {
+      console.log(`${sessions.length} sessions already exist, not creating new session`);
+    } else if (!isAuthenticated) {
+      console.log('User not authenticated, not creating session');
+    } else if (currentSession) {
+      console.log('Current session already exists, not creating new session');
+    } else {
+      console.log('Other condition - not creating session');
+    }
+  }, [authLoading, isLoadingSessions, isAuthenticated]);
 
   const handleNewChat = async () => {
-    // Clear the "no auto-session" flag when user manually creates a chat
-    localStorage.removeItem('earthgpt-no-auto-session');
     await createNewSession();
     setSidebarOpen(false);
   };
@@ -76,12 +78,6 @@ const App: React.FC = () => {
 
   const handleDeleteSession = async (sessionId: string) => {
     await deleteSession(sessionId);
-    
-    // If this was the last session, reset the "no auto-session" flag
-    // so that a new session can be auto-created if needed
-    if (sessions.length === 1) {
-      localStorage.removeItem('earthgpt-no-auto-session');
-    }
   };
 
   const handleSendMessage = async (message: string, requestDetailed?: boolean) => {
@@ -169,7 +165,6 @@ const App: React.FC = () => {
                       messages={currentSession?.messages || []}
                       isLoading={isLoading}
                       onRequestDetailed={handleRequestDetailed}
-                      isSummarizing={currentSession?.isSummarizing || false}
                     />
                   </motion.div>
                 </AnimatePresence>

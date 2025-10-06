@@ -13,12 +13,12 @@ class IntelligentOutputValidator:
     
     def __init__(self):
         """Initialize the intelligent validator."""
-        try:
-            # Use the same embedding model as the classifier for consistency
-            self.model = SentenceTransformer('all-MiniLM-L6-v2')
-            
-            # Pre-compute embeddings for sustainability themes
-            self.sustainability_themes = [
+        # Lazy loading - don't load model at startup
+        self.model = None
+        self._model_loaded = False
+        
+        # Define sustainability themes (embeddings will be computed lazily)
+        self.sustainability_themes = [
                 "environmental protection and conservation",
                 "climate change and global warming",
                 "renewable energy and clean technology", 
@@ -32,14 +32,24 @@ class IntelligentOutputValidator:
                 "corporate sustainability reporting",
                 "environmental policy and governance"
             ]
-            
-            self.theme_embeddings = self.model.encode(self.sustainability_themes)
-            logger.info("Intelligent output validator initialized with semantic analysis")
-            
-        except Exception as e:
-            logger.error(f"Failed to initialize intelligent validator: {e}")
-            self.model = None
-            self.theme_embeddings = None
+        
+        # Embeddings will be computed lazily when first needed
+        self.theme_embeddings = None
+        
+        logger.info("Intelligent output validator initialized (lazy loading enabled)")
+    
+    def _ensure_model_loaded(self):
+        """Lazy load the embedding model and compute embeddings if not already loaded."""
+        if not self._model_loaded:
+            try:
+                logger.info("Loading embedding model for intelligent output validator...")
+                self.model = SentenceTransformer('all-MiniLM-L6-v2')
+                self.theme_embeddings = self.model.encode(self.sustainability_themes)
+                self._model_loaded = True
+                logger.info("Intelligent output validator model loaded successfully")
+            except Exception as e:
+                logger.error(f"Failed to load intelligent validator model: {e}")
+                self.model = None
     
     def validate_output_intelligent(
         self, 
@@ -113,6 +123,12 @@ class IntelligentOutputValidator:
     def _calculate_semantic_sustainability_score(self, response: str) -> float:
         """Calculate semantic similarity to sustainability themes."""
         try:
+            # Ensure model is loaded (lazy loading)
+            self._ensure_model_loaded()
+            
+            if not self.model:
+                return 0.0  # Return neutral score if model failed to load
+                
             response_embedding = self.model.encode([response])
             
             # Calculate cosine similarity manually without sklearn

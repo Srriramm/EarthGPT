@@ -2,7 +2,8 @@ import React, { useState } from 'react';
 import { 
   Copy, 
   Check, 
-  ChevronDown
+  ChevronDown,
+  Database
 } from 'lucide-react';
 import { Message } from '../types';
 import ReactMarkdown from 'react-markdown';
@@ -34,29 +35,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
   };
 
   const isUser = message.role === 'user';
-  const isAssistant = message.role === 'assistant';
 
-  const markdownComponents = {
-    h1: ({node, children, ...props}: any) => <h1 className="text-xl font-semibold mb-3 text-gray-900 dark:text-white" {...props}>{children}</h1>,
-    h2: ({node, children, ...props}: any) => <h2 className="text-lg font-semibold mb-2 text-gray-900 dark:text-white" {...props}>{children}</h2>,
-    h3: ({node, children, ...props}: any) => <h3 className="text-base font-semibold mb-2 text-gray-900 dark:text-white" {...props}>{children}</h3>,
-    h4: ({node, children, ...props}: any) => <h4 className="text-sm font-semibold mb-1 text-gray-900 dark:text-white" {...props}>{children}</h4>,
-    p: ({node, children, ...props}: any) => <p className="mb-3 leading-relaxed text-justify" {...props}>{children}</p>,
-    ul: ({node, children, ...props}: any) => <ul className="list-disc list-outside mb-3 space-y-2 ml-4" {...props}>{children}</ul>,
-    ol: ({node, children, ...props}: any) => <ol className="list-decimal list-outside mb-3 space-y-2 ml-4" {...props}>{children}</ol>,
-    li: ({node, children, ...props}: any) => <li className="leading-relaxed" {...props}>{children}</li>,
-    strong: ({node, children, ...props}: any) => <strong className="font-semibold text-gray-900 dark:text-white" {...props}>{children}</strong>,
-    em: ({node, children, ...props}: any) => <em className="italic" {...props}>{children}</em>,
-    code: ({node, inline, className, children, ...props}: any) => 
-      inline ? 
-        <code className="bg-gray-100 dark:bg-gray-800 px-1 py-0.5 rounded text-sm font-mono" {...props}>{children}</code> :
-        <code className="block bg-gray-100 dark:bg-gray-800 p-3 rounded-lg text-sm font-mono overflow-x-auto" {...props}>{children}</code>,
-    blockquote: ({node, children, ...props}: any) => <blockquote className="border-l-4 border-earth-500 pl-4 italic my-3" {...props}>{children}</blockquote>,
-    a: ({node, children, ...props}: any) => <a className="text-earth-600 dark:text-earth-400 hover:underline" {...props}>{children}</a>,
-    table: ({node, children, ...props}: any) => <table className="min-w-full border-collapse border border-gray-300 dark:border-gray-700 my-3" {...props}>{children}</table>,
-    th: ({node, children, ...props}: any) => <th className="border border-gray-300 dark:border-gray-700 px-3 py-2 bg-gray-50 dark:bg-gray-800 font-semibold" {...props}>{children}</th>,
-    td: ({node, children, ...props}: any) => <td className="border border-gray-300 dark:border-gray-700 px-3 py-2" {...props}>{children}</td>,
-  };
 
   if (isUser) {
     // User message layout (right-aligned, content-based width)
@@ -69,7 +48,17 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
           <div className="prose prose-sm max-w-none dark:prose-invert text-gray-900 dark:text-gray-100 text-justify">
             <ReactMarkdown
               remarkPlugins={[remarkGfm]}
-              components={markdownComponents}
+              components={{
+                h1: ({children}) => <h1 className="text-2xl font-bold mb-4 mt-6 text-gray-900 dark:text-gray-100">{children}</h1>,
+                h2: ({children}) => <h2 className="text-xl font-bold mb-3 mt-5 text-gray-900 dark:text-gray-100">{children}</h2>,
+                h3: ({children}) => <h3 className="text-lg font-bold mb-2 mt-4 text-gray-900 dark:text-gray-100">{children}</h3>,
+                h4: ({children}) => <h4 className="text-base font-bold mb-2 mt-3 text-gray-900 dark:text-gray-100">{children}</h4>,
+                p: ({children}) => <p className="mb-4 leading-relaxed text-justify">{children}</p>,
+                strong: ({children}) => <strong className="font-semibold text-gray-900 dark:text-gray-100">{children}</strong>,
+                ul: ({children}) => <ul className="list-disc list-outside ml-6 mb-4 space-y-2">{children}</ul>,
+                ol: ({children}) => <ol className="list-decimal list-outside ml-6 mb-4 space-y-2">{children}</ol>,
+                li: ({children}) => <li className="leading-relaxed mb-1">{children}</li>,
+              }}
             >
               {message.content}
             </ReactMarkdown>
@@ -103,19 +92,38 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
       {/* Message Bubble */}
       <div className="inline-block max-w-3xl p-3 bg-blue-100 dark:bg-blue-900 rounded-lg">
           {/* Header */}
-          {isSummary && (
-            <div className="flex items-center gap-2 mb-2">
+          <div className="flex items-center gap-2 mb-2 flex-wrap">
+            {isSummary && (
               <span className="sustainability-badge">
                 Summary
               </span>
-            </div>
-          )}
+            )}
+            
+            
+            {/* Memory Indicator */}
+            {message.memory_used && (
+              <span className="flex items-center gap-1 px-2 py-1 text-xs bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200 rounded-full">
+                <Database className="w-3 h-3" />
+                Memory
+              </span>
+            )}
+          </div>
 
           {/* Message Text */}
           <div className="prose prose-sm max-w-none dark:prose-invert text-gray-900 dark:text-gray-100 text-justify">
             <ReactMarkdown
               remarkPlugins={[remarkGfm]}
-              components={markdownComponents}
+              components={{
+                h1: ({children}) => <h1 className="text-2xl font-bold mb-4 mt-6 text-gray-900 dark:text-gray-100">{children}</h1>,
+                h2: ({children}) => <h2 className="text-xl font-bold mb-3 mt-5 text-gray-900 dark:text-gray-100">{children}</h2>,
+                h3: ({children}) => <h3 className="text-lg font-bold mb-2 mt-4 text-gray-900 dark:text-gray-100">{children}</h3>,
+                h4: ({children}) => <h4 className="text-base font-bold mb-2 mt-3 text-gray-900 dark:text-gray-100">{children}</h4>,
+                p: ({children}) => <p className="mb-4 leading-relaxed text-justify">{children}</p>,
+                strong: ({children}) => <strong className="font-semibold text-gray-900 dark:text-gray-100">{children}</strong>,
+                ul: ({children}) => <ul className="list-disc list-outside ml-6 mb-4 space-y-2">{children}</ul>,
+                ol: ({children}) => <ol className="list-decimal list-outside ml-6 mb-4 space-y-2">{children}</ol>,
+                li: ({children}) => <li className="leading-relaxed mb-1">{children}</li>,
+              }}
             >
               {message.content}
             </ReactMarkdown>

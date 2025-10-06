@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { ChatSession, Message, ChatResponse } from '../types';
 import { chatAPI } from '../services/api';
 import { authService } from '../services/auth';
@@ -12,40 +12,49 @@ export const useChat = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [isOnline, setIsOnline] = useState(true);
   const [isLoadingSessions, setIsLoadingSessions] = useState(true);
+  const sessionsLoadedRef = useRef(false);
 
   // Load sessions from backend on mount
   useEffect(() => {
+    console.log('useChat useEffect triggered:', {
+      isAuthenticated,
+      sessionsLoadedRef: sessionsLoadedRef.current,
+      sessionsLength: sessions.length
+    });
+    
     const loadSessions = async () => {
+      // Prevent multiple loading attempts
+      if (sessionsLoadedRef.current) {
+        console.log('Sessions already loaded, skipping reload');
+        setIsLoadingSessions(false);
+        return;
+      }
+      
       try {
-        let backendSessions: ChatSession[] = [];
-        
-        if (isAuthenticated) {
-          // Use auth service for authenticated users
-          const authSessions = await authService.getUserSessions();
-          backendSessions = authSessions.map((session: any) => ({
-            id: session.id,
-            title: session.title || 'New Chat',
-            messages: [], // Messages will be loaded when session is selected
-            createdAt: session.created_at,
-            lastActivity: session.last_activity,
-            isActive: session.is_active,
-            messageCount: session.message_count || 0, // Map backend message_count to frontend messageCount
-          }));
-        } else {
-          // Use regular API for non-authenticated users
-          const response = await chatAPI.getUserSessions();
-          backendSessions = response.sessions.map((session: any) => ({
-            id: session.session_id,
-            title: session.preview || 'New Chat',
-            messages: [], // Messages will be loaded when session is selected
-            createdAt: session.created_at,
-            lastActivity: session.last_activity,
-            isActive: session.is_active,
-            messageCount: session.message_count || 0, // Map backend message_count to frontend messageCount
-          }));
+        // Only load sessions for authenticated users
+        if (!isAuthenticated) {
+          console.log('User not authenticated, skipping session loading');
+          sessionsLoadedRef.current = true;
+          setIsLoadingSessions(false);
+          return;
         }
         
+        console.log('Loading authenticated sessions...');
+        const authSessions = await authService.getUserSessions();
+        console.log('Raw auth sessions from backend:', authSessions);
+        const backendSessions: ChatSession[] = authSessions.map((session: any) => ({
+          id: session.id,
+          title: session.title || 'New Chat',
+          messages: [], // Messages will be loaded when session is selected
+          createdAt: session.created_at,
+          lastActivity: session.last_activity,
+          isActive: session.is_active,
+          messageCount: session.message_count || 0, // Map backend message_count to frontend messageCount
+        }));
+        console.log(`Loaded ${backendSessions.length} authenticated sessions:`, backendSessions);
+        
         setSessions(backendSessions);
+        sessionsLoadedRef.current = true;
         
         // Check if we have a persisted current session ID
         const persistedSessionId = localStorage.getItem('earthgpt-current-session-id');
@@ -61,6 +70,9 @@ export const useChat = () => {
               targetSession = persistedSession;
               console.log('Restored persisted session:', persistedSessionId);
             } else {
+              console.log('Persisted session not found in backend sessions, using most recent:', persistedSessionId);
+              // Clear the invalid persisted session ID
+              localStorage.removeItem('earthgpt-current-session-id');
               // Fallback to most recent if persisted session not found
               targetSession = backendSessions.reduce((latest: ChatSession, current: ChatSession) => 
                 new Date(current.lastActivity) > new Date(latest.lastActivity) ? current : latest
@@ -75,17 +87,16 @@ export const useChat = () => {
           
           // Load messages for the target session
           try {
-            let response;
-            if (isAuthenticated) {
-              response = await authService.getSessionHistory(targetSession.id);
-            } else {
-              response = await chatAPI.getConversationHistory(targetSession.id);
-            }
+            console.log('Loading messages for target session:', targetSession.id);
+            const response = await authService.getSessionHistory(targetSession.id);
+            console.log('Session history response:', response);
+            console.log('Response messages:', response.messages);
             
             const sessionWithMessages = {
               ...targetSession,
               messages: response.messages || []
             };
+            console.log('Setting current session with messages:', sessionWithMessages);
             setCurrentSession(sessionWithMessages);
             
             // Persist the current session ID
@@ -95,6 +106,12 @@ export const useChat = () => {
             setCurrentSession(targetSession);
             localStorage.setItem('earthgpt-current-session-id', targetSession.id);
           }
+        } else {
+          // No sessions found - don't create one here, let App.tsx handle it
+          console.log('No sessions found, will let App.tsx create one if needed');
+          setCurrentSession(null);
+          localStorage.removeItem('earthgpt-current-session-id');
+          sessionsLoadedRef.current = true;
         }
       } catch (error) {
         console.error('Error loading sessions from backend:', error);
@@ -108,12 +125,27 @@ export const useChat = () => {
             console.error('Error parsing localStorage sessions:', parseError);
           }
         }
+        sessionsLoadedRef.current = true;
       } finally {
         setIsLoadingSessions(false);
       }
     };
     
     loadSessions();
+  }, [isAuthenticated]);
+
+  // Reset sessions loaded flag when authentication changes
+  useEffect(() => {
+    console.log('Authentication state changed, resetting sessions loaded flag:', isAuthenticated);
+    sessionsLoadedRef.current = false;
+    setIsLoadingSessions(true);
+    
+    // Clear current session when authentication changes
+    if (!isAuthenticated) {
+      setCurrentSession(null);
+      setSessions([]);
+      localStorage.removeItem('earthgpt-current-session-id');
+    }
   }, [isAuthenticated]);
 
   // Save sessions to localStorage as backup whenever sessions change
@@ -136,31 +168,16 @@ export const useChat = () => {
   // Create a new chat session
   const createNewSession = useCallback(async () => {
     try {
-      let newSession: ChatSession;
-      
-      if (isAuthenticated) {
-        // Use authenticated session creation
-        const response = await authService.createSession({ title: 'New Chat' });
-        newSession = {
-          id: response.id,
-          title: response.title,
-          messages: [],
-          createdAt: response.created_at,
-          lastActivity: response.last_activity,
-          isActive: response.is_active,
-        };
-      } else {
-        // Use non-authenticated session creation
-        const response = await chatAPI.createSession();
-        newSession = {
-          id: response.session_id,
-          title: 'New Chat',
-          messages: [],
-          createdAt: new Date().toISOString(),
-          lastActivity: new Date().toISOString(),
-          isActive: true,
-        };
-      }
+      // Use authenticated session creation only
+      const response = await authService.createSession({ title: 'New Chat' });
+      const newSession: ChatSession = {
+        id: response.id,
+        title: response.title,
+        messages: [],
+        createdAt: response.created_at,
+        lastActivity: response.last_activity,
+        isActive: response.is_active,
+      };
 
       setSessions(prev => [newSession, ...prev]);
       // Switch to new session with smooth transition
@@ -189,24 +206,21 @@ export const useChat = () => {
       localStorage.setItem('earthgpt-current-session-id', newSession.id);
       return newSession;
     }
-  }, [isAuthenticated]);
+  }, []);
 
   // Select a session and load its messages
   const selectSession = useCallback(async (session: ChatSession) => {
     try {
-      // Load messages for this session from backend
-      let response;
-      if (isAuthenticated) {
-        response = await authService.getSessionHistory(session.id);
-      } else {
-        response = await chatAPI.getConversationHistory(session.id);
-      }
+      // Load messages for this session from backend (authenticated only)
+      const response = await authService.getSessionHistory(session.id);
       
       console.log('Loaded messages for session:', session.id, response.messages);
+      console.log('Response from getSessionHistory:', response);
       const sessionWithMessages = {
         ...session,
         messages: response.messages || []
       };
+      console.log('Setting current session with messages:', sessionWithMessages);
       setCurrentSession(sessionWithMessages);
       
       // Persist the selected session ID
@@ -217,16 +231,12 @@ export const useChat = () => {
       setCurrentSession(session);
       localStorage.setItem('earthgpt-current-session-id', session.id);
     }
-  }, [isAuthenticated]);
+  }, []);
 
   // Delete a session
   const deleteSession = useCallback(async (sessionId: string) => {
     try {
-      if (isAuthenticated) {
-        await authService.deleteSession(sessionId);
-      } else {
-        await chatAPI.deleteSession(sessionId);
-      }
+      await authService.deleteSession(sessionId);
       
       setSessions(prev => prev.filter(session => session.id !== sessionId));
       
@@ -244,7 +254,7 @@ export const useChat = () => {
       console.error('Error deleting session:', error);
       toast.error('Failed to delete session');
     }
-  }, [currentSession, sessions, isAuthenticated]);
+  }, [currentSession, sessions]);
 
   // Update session title based on first message
   const updateSessionTitle = useCallback((sessionId: string, title: string) => {
@@ -293,37 +303,45 @@ export const useChat = () => {
         updateSessionTitle(currentSession.id, title);
       }
 
-      // Send message to API (use authenticated endpoint if user is logged in)
+      // Send message to API (authenticated only)
       let response: ChatResponse;
-      if (isAuthenticated) {
+      try {
         response = await authService.sendAuthenticatedMessage({
           message: content,
           session_id: currentSession.id,
           request_detailed: requestDetailed,
         });
-      } else {
-        response = await chatAPI.sendMessage({
-          message: content,
-          session_id: currentSession.id,
-          request_detailed: requestDetailed,
-        });
+      } catch (error: any) {
+        // If session not found, create a new session and retry
+        if (error.response?.status === 404 && error.response?.data?.detail === "Session not found") {
+          console.log('Session not found, creating new session and retrying...');
+          const newSession = await createNewSession();
+          
+          // Retry with new session
+          response = await authService.sendAuthenticatedMessage({
+            message: content,
+            session_id: newSession.id,
+            request_detailed: requestDetailed,
+          });
+        } else {
+          throw error;
+        }
       }
 
-      // Add assistant response (including rejection messages)
+      // Add assistant response
       const assistantMessage: Message = {
         role: 'assistant',
         content: response.response,
         timestamp: response.timestamp,
+        memory_used: response.memory_used,
       };
 
       const finalMessages = [...updatedMessages, assistantMessage];
-
       const finalSession = {
         ...updatedSession,
         messages: finalMessages,
         lastActivity: new Date().toISOString(),
-        messageCount: response.message_count || finalMessages.length, // Use backend message count
-        isSummarizing: response.summarization_triggered || false,
+        messageCount: finalMessages.length, // Update message count
       };
 
       setCurrentSession(finalSession);
@@ -331,19 +349,10 @@ export const useChat = () => {
         session.id === currentSession.id ? finalSession : session
       ));
 
-      // Auto-hide summarization indicator after 3 seconds
-      if (response.summarization_triggered) {
-        setTimeout(() => {
-          setCurrentSession(prev => prev ? { ...prev, isSummarizing: false } : null);
-          setSessions(prev => prev.map(session => 
-            session.id === currentSession.id 
-              ? { ...session, isSummarizing: false }
-              : session
-          ));
-        }, 3000);
+      // Show guardrail warning if triggered
+      if (response.guardrail_triggered) {
+        toast.error('This topic is outside my sustainability focus. Please ask about environmental topics.');
       }
-
-      // No toast notification for guardrail triggers - silent blocking
 
     } catch (error) {
       console.error('Error sending message:', error);
@@ -357,7 +366,7 @@ export const useChat = () => {
     } finally {
       setIsLoading(false);
     }
-  }, [currentSession, updateSessionTitle]);
+  }, [currentSession, updateSessionTitle, createNewSession]);
 
   // Request detailed explanation
   const requestDetailed = useCallback(async () => {

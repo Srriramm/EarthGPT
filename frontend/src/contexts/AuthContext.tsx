@@ -25,16 +25,22 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   // Initialize authentication state
   useEffect(() => {
     const initializeAuth = async () => {
+      console.log('AuthContext: Initializing authentication...');
       try {
         if (authService.isAuthenticated()) {
+          console.log('AuthContext: User is authenticated, fetching user data...');
           const currentUser = await authService.fetchCurrentUser();
+          console.log('AuthContext: User data fetched:', currentUser);
           setUser(currentUser);
+        } else {
+          console.log('AuthContext: User is not authenticated');
         }
       } catch (error) {
-        console.error('Failed to initialize auth:', error);
+        console.error('AuthContext: Failed to initialize auth:', error);
         // Clear invalid auth state
         await authService.logout();
       } finally {
+        console.log('AuthContext: Authentication initialization complete');
         setIsLoading(false);
       }
     };

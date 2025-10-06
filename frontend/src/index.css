@@ -54,17 +54,29 @@
     @apply inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-earth-100 text-earth-800 dark:bg-earth-900 dark:text-earth-200;
   }
   
-  /* Improved list formatting */
-  .prose ol {
-    @apply list-decimal list-outside ml-6 space-y-2;
+  /* Enhanced prose formatting for better readability */
+  .prose {
+    @apply text-gray-900 dark:text-gray-100;
   }
   
-  .prose ul {
-    @apply list-disc list-outside ml-6 space-y-2;
+  .prose h1, .prose h2, .prose h3, .prose h4, .prose h5, .prose h6 {
+    @apply text-gray-900 dark:text-gray-100 font-semibold;
   }
   
-  .prose li {
-    @apply leading-relaxed;
+  .prose p {
+    @apply text-justify;
+  }
+  
+  .prose strong {
+    @apply font-semibold text-gray-900 dark:text-gray-100;
+  }
+  
+  .prose a {
+    @apply text-earth-600 dark:text-earth-400 hover:underline;
+  }
+  
+  .prose blockquote {
+    @apply border-l-4 border-earth-500 pl-4 italic my-4 text-gray-700 dark:text-gray-300;
   }
 }
 

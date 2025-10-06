@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Menu, Settings, User, LogOut, ChevronDown } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Menu, User, LogOut, ChevronDown } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '../contexts/AuthContext';
 import { ChatSession } from '../types';
@@ -25,6 +25,7 @@ const Header: React.FC<HeaderProps> = ({
       console.error('Logout failed:', error);
     }
   };
+
   return (
     <header className="h-16 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between px-4 lg:px-6">
       {/* Left side */}
@@ -62,12 +63,16 @@ const Header: React.FC<HeaderProps> = ({
 
       {/* Right side */}
       <div className="flex items-center gap-3">
-        {/* Status indicator */}
-        <div className="flex items-center gap-2 text-sm">
-          <div className={`w-2 h-2 rounded-full ${isOnline ? 'bg-green-500 animate-pulse-green' : 'bg-red-500'}`}></div>
-          <span className="text-gray-600 dark:text-gray-400">
-            {isOnline ? 'Online' : 'Offline'}
-          </span>
+        {/* Status indicators */}
+        <div className="flex items-center gap-4 text-sm">
+          {/* Online status */}
+          <div className="flex items-center gap-2">
+            <div className={`w-2 h-2 rounded-full ${isOnline ? 'bg-green-500 animate-pulse-green' : 'bg-red-500'}`}></div>
+            <span className="text-gray-600 dark:text-gray-400">
+              {isOnline ? 'Online' : 'Offline'}
+            </span>
+          </div>
+          
         </div>
 
         {/* User menu */}

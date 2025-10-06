@@ -70,12 +70,12 @@ CORE ENVIRONMENTAL TOPICS:
 - Sustainable agriculture, forestry, and land use
 
 SUSTAINABILITY FRAMEWORKS & STANDARDS:
-- ESG (Environmental, Social, Governance) investing and reporting
+- ESG (Environmental, Social, Governance) investing and reporting (ONLY when explicitly about environmental aspects)
 - Sustainability certifications and standards (FSC, LEED, B-Corp, etc.)
 - Carbon credit systems and verification bodies (Verra, Gold Standard, etc.)
 - Environmental impact assessments and life cycle analysis
 - Sustainability reporting frameworks (GRI, SASB, TCFD, etc.)
-- Green bonds, sustainable finance, and impact investing
+- Green bonds, sustainable finance, and impact investing (ONLY when explicitly about environmental impact)
 
 SUSTAINABLE PRACTICES & SYSTEMS:
 - Circular economy, waste reduction, and recycling
@@ -103,6 +103,19 @@ FOLLOW-UP QUERIES:
 - Any follow-up requests about previously discussed sustainability topics
 - Requests for clarification, examples, or more details on sustainability matters
 
+MEMORY QUERIES:
+- Questions asking about previous conversations or what was said before
+- Requests to recall or remember information from earlier discussions
+- Questions about topics that were previously covered in sustainability conversations
+- Any query that references past conversations, even if the specific topic isn't explicitly sustainability-related
+
+ELABORATION & FOLLOW-UP QUERIES:
+- Requests for elaboration, expansion, or more details on any topic
+- Questions like "can you elaborate", "tell me more", "explain more", "give me more details"
+- Follow-up questions that build on previous responses
+- Requests for deeper explanations or step-by-step breakdowns
+- Any query that asks for more information or clarification
+
 Consider the following as NOT sustainability-related:
 - General personal health and fitness (unless discussing environmental health impacts)
 - Entertainment, sports, gaming (unless discussing environmental impact of these industries)
@@ -112,6 +125,9 @@ Consider the following as NOT sustainability-related:
 - Personal relationships and lifestyle (unless discussing sustainable living)
 - General cooking and recipes (unless about sustainable food practices)
 - General travel and tourism (unless about sustainable or eco-tourism)
+- General portfolio management and risk analytics (unless explicitly about environmental/climate risk)
+- General financial analysis and investment strategies (unless explicitly about ESG or sustainable finance)
+- General business operations and management (unless specifically about sustainability practices)
 
 User Query: "{query}"
 

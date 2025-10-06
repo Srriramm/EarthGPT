@@ -2,6 +2,7 @@ export interface Message {
   role: 'user' | 'assistant' | 'system';
   content: string;
   timestamp: string;
+  memory_used?: boolean;
 }
 
 export interface ChatSession {
@@ -12,7 +13,6 @@ export interface ChatSession {
   lastActivity: string;
   isActive: boolean;
   messageCount?: number; // Add message count from backend
-  isSummarizing?: boolean; // Whether context is being summarized
 }
 
 export interface ChatResponse {
@@ -22,8 +22,8 @@ export interface ChatResponse {
   can_request_detailed: boolean;
   guardrail_triggered: boolean;
   guardrail_reason?: string;
-  message_count?: number;
-  summarization_triggered?: boolean;
+  web_search_enabled: boolean;
+  memory_used: boolean;
   timestamp: string;
 }
 
@@ -47,6 +47,7 @@ export interface HealthResponse {
   model_loaded: boolean;
   guardrails_enabled: boolean;
   memory_system_active: boolean;
+  web_search_enabled: boolean;
 }
 
 export interface SustainabilityTopic {

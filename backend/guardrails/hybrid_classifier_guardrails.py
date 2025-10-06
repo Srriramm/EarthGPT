@@ -20,10 +20,9 @@ class HybridClassifierGuardrails(BaseGuardrails):
         """Initialize hybrid classifier guardrails."""
         super().__init__()
         
-        # Initialize embedding model
-        logger.info("Loading embedding model for hybrid classifier...")
-        self.embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
-        logger.info("Embedding model loaded successfully")
+        # Lazy loading - don't load models at startup
+        self.embedding_model = None
+        self._model_loaded = False
         
         # Define broad sustainability category labels for embedding comparison
         self.sustainability_categories = [
@@ -72,19 +71,12 @@ class HybridClassifierGuardrails(BaseGuardrails):
             "general business and marketing advice"
         ]
         
-        # Pre-compute embeddings for category labels
-        logger.info("Computing embeddings for sustainability categories...")
-        self.sustainability_embeddings = self.embedding_model.encode(self.sustainability_categories)
-        self.non_sustainability_embeddings = self.embedding_model.encode(self.non_sustainability_categories)
+        # Initialize intelligent output validator for long-term robustness (lazy loading)
+        self.output_validator = None
         
-        # Initialize intelligent output validator for long-term robustness
-        try:
-            self.output_validator = IntelligentOutputValidator()
-            logger.info("Intelligent output validator initialized")
-        except Exception as e:
-            logger.warning(f"Failed to initialize intelligent output validator: {e}")
-            self.output_validator = None
-        logger.info(f"Computed embeddings for {len(self.sustainability_categories)} sustainability and {len(self.non_sustainability_categories)} non-sustainability categories")
+        # Embeddings will be computed lazily when first needed
+        self.sustainability_embeddings = None
+        self.non_sustainability_embeddings = None
         
         # Thresholds for decision making
         self.high_confidence_threshold = 0.7  # Clearly sustainability-related
@@ -95,14 +87,48 @@ class HybridClassifierGuardrails(BaseGuardrails):
         self.follow_up_phrases = [
             "explain more", "more details", "tell me more", "elaborate",
             "can you tell more", "can you explain more", "can you elaborate", 
+            "explain this further", "can you explain this further", "explain further",
             "yes", "y", "yeah", "yep", "sure", "ok", "okay",
             "what else", "anything else", "more information", "continue",
             "go on", "keep going", "more", "please", "summarize", "summary",
             "can you", "could you", "would you", "please elaborate", "please explain",
-            "tell me", "show me", "give me", "provide", "expand", "detail"
+            "tell me", "show me", "give me", "provide", "expand", "detail",
+            "this further", "explain it further", "tell me more about this"
         ]
         
-        logger.info("Hybrid classifier guardrails initialized successfully")
+        # Memory-related phrases that should be allowed
+        self.memory_phrases = [
+            "do you remember", "remember what", "what did you say", "you said",
+            "you mentioned", "you told me", "you explained", "you discussed",
+            "earlier you", "previously you", "before you", "you talked about",
+            "you covered", "you described", "you outlined", "you provided",
+            "can you recall", "do you recall", "can you remember", "do you remember",
+            "what was that", "what did we discuss", "what did we talk about",
+            "from our conversation", "in our chat", "from earlier", "from before",
+            # Elaboration and follow-up patterns
+            "can you elaborate", "please elaborate", "elaborate on", "elaborate it",
+            "tell me more", "explain more", "give me more", "more details",
+            "more information", "expand on", "go deeper", "dive deeper",
+            "break it down", "walk me through", "show me how", "explain how",
+            "can you explain", "please explain", "explain it", "explain that"
+        ]
+        
+        logger.info("Hybrid classifier guardrails initialized successfully (lazy loading enabled)")
+    
+    def _ensure_model_loaded(self):
+        """Lazy load the embedding model and compute embeddings if not already loaded."""
+        if not self._model_loaded:
+            logger.info("Loading embedding model for hybrid classifier...")
+            self.embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
+            logger.info("Embedding model loaded successfully")
+            
+            # Compute embeddings for category labels
+            logger.info("Computing embeddings for sustainability categories...")
+            self.sustainability_embeddings = self.embedding_model.encode(self.sustainability_categories)
+            self.non_sustainability_embeddings = self.embedding_model.encode(self.non_sustainability_categories)
+            logger.info(f"Computed embeddings for {len(self.sustainability_categories)} sustainability and {len(self.non_sustainability_categories)} non-sustainability categories")
+            
+            self._model_loaded = True
     
     def check_sustainability_relevance(self, query: str, conversation_context: str = None) -> GuardrailCheck:
         """
@@ -154,6 +180,16 @@ class HybridClassifierGuardrails(BaseGuardrails):
                     detected_keywords=["follow-up", "short-query"],
                     rejection_reason=None
                 )
+        
+        # MEMORY QUERY DETECTION
+        if self._is_memory_query(query_lower):
+            logger.info("Memory-related query detected, allowing through")
+            return GuardrailCheck(
+                is_sustainability_related=True,
+                confidence_score=0.9,
+                detected_keywords=["memory-query", "context-aware"],
+                rejection_reason=None
+            )
         
         # HYBRID CLASSIFICATION
         logger.info(f"Applying hybrid classification for query: '{query[:50]}...'")
@@ -228,6 +264,9 @@ class HybridClassifierGuardrails(BaseGuardrails):
             Tuple of (sustainability_score, confidence_level)
             confidence_level: "high_sustainability", "high_non_sustainability", or "uncertain"
         """
+        # Ensure model is loaded (lazy loading)
+        self._ensure_model_loaded()
+        
         # Get query embedding
         query_embedding = self.embedding_model.encode([query])
         
@@ -283,6 +322,7 @@ class HybridClassifierGuardrails(BaseGuardrails):
         explicit_patterns = [
             # Direct continuation requests
             "explain more", "tell me more", "elaborate", "can you elaborate",
+            "explain this further", "can you explain this further", "explain further",
             "more details", "more information", "continue", "go on", "keep going",
             
             # Affirmative + request
@@ -310,13 +350,20 @@ class HybridClassifierGuardrails(BaseGuardrails):
             
             # Context-dependent pronouns and references
             "explain it", "tell me about it", "how does it work", "what is it",
-            "show me how", "demonstrate it", "prove it", "verify it"
+            "show me how", "demonstrate it", "prove it", "verify it",
+            "this further", "explain it further", "tell me more about this"
         ]
         
         # Check explicit patterns
         for pattern in explicit_patterns:
             if pattern in query_lower:
                 logger.debug(f"Follow-up detected: explicit pattern '{pattern}'")
+                return True
+        
+        # Additional pattern matching for variations
+        if any(word in query_lower for word in ['elaborate', 'explain', 'clarify', 'expand', 'detail']):
+            if any(pronoun in query_lower for pronoun in ['it', 'this', 'that', 'these', 'those']):
+                logger.debug(f"Follow-up detected: elaboration request with pronoun")
                 return True
         
         # 2. CONTEXTUAL HEURISTICS
@@ -349,6 +396,56 @@ class HybridClassifierGuardrails(BaseGuardrails):
         
         return False
     
+    def _is_memory_query(self, query_lower: str) -> bool:
+        """
+        Detect if a query is memory-related and should be allowed through.
+        
+        Args:
+            query_lower: Lowercase query string
+            
+        Returns:
+            True if the query is memory-related
+        """
+        # Check for memory-related phrases
+        for phrase in self.memory_phrases:
+            if phrase in query_lower:
+                logger.debug(f"Memory query detected: phrase '{phrase}' found")
+                return True
+        
+        # Additional memory patterns
+        memory_patterns = [
+            "what did you say about",
+            "you said something about",
+            "you mentioned something about",
+            "you told me about",
+            "you explained about",
+            "you discussed about",
+            "you talked about",
+            "you covered",
+            "you described",
+            "you outlined",
+            "you provided information about",
+            "from our previous conversation",
+            "from our earlier discussion",
+            "from our chat",
+            "from before",
+            "from earlier",
+            "what was that about",
+            "what did we discuss about",
+            "what did we talk about",
+            "can you recall what",
+            "do you recall what",
+            "can you remember what",
+            "do you remember what"
+        ]
+        
+        for pattern in memory_patterns:
+            if pattern in query_lower:
+                logger.debug(f"Memory query detected: pattern '{pattern}' found")
+                return True
+        
+        return False
+    
     def _two_layer_follow_up_detection(self, query_lower: str, conversation_context: str = None) -> bool:
         """
         Two-layer follow-up detection system:
@@ -371,7 +468,7 @@ class HybridClassifierGuardrails(BaseGuardrails):
             has_pronouns = any(pronoun in query_lower.split() for pronoun in pronouns)
             
             # Use LLM for ambiguous cases
-            if (word_count <= 10) or has_pronouns or any(word in query_lower for word in ['explain', 'tell', 'show', 'clarify']):
+            if (word_count <= 10) or has_pronouns or any(word in query_lower for word in ['explain', 'tell', 'show', 'clarify', 'elaborate', 'expand', 'detail']):
                 logger.debug("Query is ambiguous, using LLM for follow-up detection")
                 return self._llm_follow_up_detection(query_lower, conversation_context)
         
@@ -408,9 +505,12 @@ A follow-up question typically:
 
 Examples of follow-up questions:
 - "Can you explain it in short?" (after a detailed explanation)
+- "Can you elaborate it?" (after explaining something)
 - "What about renewable energy?" (after discussing sustainability)
 - "How does that work?" (after mentioning a process)
 - "Tell me more about that" (after introducing a topic)
+- "Can you expand on that?" (after a brief explanation)
+- "More details please" (after a summary)
 
 Examples of NEW questions (not follow-ups):
 - "What is climate change?" (standalone question)
@@ -487,7 +587,14 @@ Answer with ONLY "YES" if it's a follow-up question, or "NO" if it's a new stand
         Returns:
             Tuple of (is_valid, rejection_reason)
         """
-        # Use intelligent validator if available
+        # Use intelligent validator if available (lazy loading)
+        if self.output_validator is None:
+            try:
+                self.output_validator = IntelligentOutputValidator()
+            except Exception as e:
+                logger.warning(f"Failed to initialize intelligent output validator: {e}")
+                self.output_validator = None
+        
         if self.output_validator:
             try:
                 is_valid, rejection_reason, metadata = self.output_validator.validate_output_intelligent(

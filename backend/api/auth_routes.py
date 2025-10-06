@@ -72,32 +72,6 @@ async def login_user(user_credentials: UserLogin):
         )
 
 
-@router.post("/refresh", response_model=Token)
-async def refresh_token(current_user: User = Depends(get_current_active_user)):
-    """Refresh access token for current user."""
-    try:
-        # Create new access token
-        access_token_expires = timedelta(minutes=settings.access_token_expire_minutes)
-        access_token = user_model.create_access_token(
-            data={"sub": current_user.id}, expires_delta=access_token_expires
-        )
-        
-        logger.info(f"Token refreshed for user: {current_user.email}")
-        
-        return Token(
-            access_token=access_token,
-            token_type="bearer",
-            expires_in=settings.access_token_expire_minutes * 60
-        )
-        
-    except Exception as e:
-        logger.error(f"Token refresh error: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Token refresh failed"
-        )
-
-
 @router.get("/me", response_model=User)
 async def get_current_user_info(current_user: User = Depends(get_current_active_user)):
     """Get current user information."""
@@ -116,6 +90,11 @@ async def create_chat_session(
             title=session_data.title
         )
         logger.info(f"New chat session created for user {current_user.id}: {new_session.id}")
+        
+        # Also create the session in MongoDB memory
+        from core.mongodb_memory import mongodb_session_manager
+        await mongodb_session_manager.create_session(current_user.id, new_session.id)
+        
         return new_session
     except Exception as e:
         logger.error(f"Session creation error: {e}")
@@ -132,10 +111,6 @@ async def get_user_sessions(
 ):
     """Get all chat sessions for the current user."""
     try:
-        # First restore user sessions from database to memory
-        restored_count = await smart_memory_manager.restore_user_sessions_from_database(current_user.id)
-        logger.info(f"Restored {restored_count} sessions for user {current_user.id} when fetching session list")
-        
         sessions = await chat_session_model.get_user_sessions(
             user_id=current_user.id,
             limit=limit
@@ -245,34 +220,21 @@ async def get_chat_session_history(
                     detail="Chat session not found"
                 )
         
-        # Get conversation from smart memory
-        session = smart_memory_manager.get_session(session_id)
-        if session:
+        # Get conversation from MongoDB memory
+        from core.mongodb_memory import mongodb_session_manager
+        session_info = await mongodb_session_manager.get_session_info(session_id)
+        if session_info:
+            # Get messages from the MongoDB memory system
+            session_messages = await mongodb_session_manager.get_session_messages(session_id)
             messages = []
-            for role, content in session.history:
+            for msg in session_messages:
                 messages.append({
-                    "role": role,
-                    "content": content,
-                    "timestamp": session.last_activity.isoformat()
+                    "role": msg.role.value,
+                    "content": msg.content,
+                    "timestamp": msg.timestamp.isoformat()
                 })
         else:
-            # Try to restore session from database
-            logger.info(f"Session {session_id} not in memory, attempting to restore from database")
-            restored = await smart_memory_manager.restore_session_from_database(session_id, user_id_for_conversation)
-            if restored:
-                session = smart_memory_manager.get_session(session_id)
-                if session:
-                    messages = []
-                    for role, content in session.history:
-                        messages.append({
-                            "role": role,
-                            "content": content,
-                            "timestamp": session.last_activity.isoformat()
-                        })
-                else:
-                    messages = []
-            else:
-                messages = []
+            messages = []
         
         if messages:
             # Convert to the expected format

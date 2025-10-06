@@ -151,7 +151,7 @@ class AuthService {
   async sendAuthenticatedMessage(request: { message: string; session_id?: string; request_detailed?: boolean }): Promise<any> {
     try {
       // Use the regular api instance for chat endpoints since they're under /api/v1
-      const response = await api.post('/chat/authenticated', request);
+      const response = await api.post('/chat', request);
       return response.data;
     } catch (error) {
       console.error('Failed to send authenticated message:', error);

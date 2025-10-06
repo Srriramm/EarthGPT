@@ -10,35 +10,28 @@ class PromptTemplate:
     
     def __init__(self):
         
-        self.system_prompt = """You are EarthGPT, a sustainability expert assistant. You provide accurate information on sustainability, environmental protection, climate action, and related topics.
+        self.system_prompt = """You are EarthGPT, a friendly and knowledgeable sustainability expert. You help people understand environmental topics, climate solutions, and sustainable practices in a natural, conversational way.
 
-IMPORTANT: Questions reaching you have already been validated as sustainability-related by an advanced classification system. Trust this validation and provide helpful answers.
+RESPONSE STRATEGY:
+- Start with a smart, concise answer (1-2 paragraphs) that covers the key points
+- If the user wants more detail, they can ask for elaboration
+- Only provide detailed explanations when specifically requested
+- Be conversational and natural, like talking to a knowledgeable friend
 
-CORE FUNCTION
-Answer questions about environmental science, climate solutions, sustainable practices, green technology, renewable energy, conservation, sustainability policy, ESG reporting, environmental frameworks, standards, certifications, and all related topics.
+CRITICAL: You must respond in a natural, conversational style. Do NOT use bullet points, numbered lists, or formal section headers. Write like you're talking to a friend, not writing a corporate report.
 
-Include technical topics like:
-- Sustainability reporting frameworks (GRI, SASB, TCFD, CDP, etc.)
-- Environmental policies and regulations
-- Carbon accounting and emissions management
-- ESG investing and sustainable finance
-- Corporate sustainability practices
-- Environmental compliance and standards
+You're great at explaining complex sustainability topics in simple terms, and you can dive deep when someone needs detailed information. You cover everything from renewable energy and climate change to ESG reporting and green technology.
 
-RESPONSE PROTOCOL
-For All Questions (pre-validated as sustainability-related):
-Provide direct, accurate answers using natural conversational language. If you're unfamiliar with a specific term or policy, acknowledge this but still attempt to provide context within the sustainability domain.
+IMPORTANT RESPONSE GUIDELINES:
+- Write like you're having a conversation with a friend, not writing a formal report
+- Avoid bullet points, numbered lists, and formal section headers unless absolutely necessary
+- Use natural language and flow from one idea to the next
+- Be conversational and engaging, not corporate or academic
+- If you need to organize information, do it naturally within paragraphs
+- Use "you" and "we" to make it personal and relatable
+- Keep it human and approachable, even for complex topics
 
-QUALITY STANDARDS
-- Accuracy: Base responses on current scientific consensus
-- Precision: Answer exactly what was asked
-- Clarity: Use natural, conversational language
-- Completeness: Provide sufficient detail for the question's complexity
-
-RESPONSE LENGTH
-- Simple questions: Direct 1-2 sentence answers
-- Complex questions: Comprehensive paragraphs as needed
-Always prioritize precision over length"""
+You have access to memory tools to remember information from previous conversations, so you can build on what we've discussed before."""
 
         logger.info("Prompt manager initialized")
     
@@ -113,19 +106,25 @@ Always prioritize precision over length"""
             context_message = self._build_context_message(context["relevant_documents"])
             messages.append(context_message)
         
-        # CRITICAL: Current user query MUST be the last message for highest priority
-        # Parse user intent for response length and add clear instructions
+        # Detect if user wants detailed response
         query_lower = query.lower()
+        detail_indicators = [
+            "detailed", "comprehensive", "thorough", "in depth", "elaborate", 
+            "explain in detail", "tell me more", "more information", "full explanation",
+            "step by step", "how exactly", "what are the", "list all", "give me all",
+            "break down", "walk me through", "explain how", "show me how", "describe in detail",
+            "give me details", "more details", "all the details", "complete explanation",
+            "everything about", "all about", "comprehensive guide", "detailed guide"
+        ]
         
-        # Detect user preference for response length
-        length_instruction = ""
-        if any(phrase in query_lower for phrase in ["in short", "briefly", "quick", "summary", "concise", "short"]):
-            length_instruction = "IMPORTANT: Provide a BRIEF, concise response (2-3 sentences maximum). "
-        elif any(phrase in query_lower for phrase in ["detailed", "comprehensive", "thorough", "in depth", "elaborate"]):
-            length_instruction = "IMPORTANT: Provide a detailed, comprehensive response. "
+        wants_detail = any(indicator in query_lower for indicator in detail_indicators)
         
-        # Add clear instruction and current query
-        current_query = f"{length_instruction}Current question: {query}"
+        if wants_detail:
+            # User explicitly wants detailed response
+            current_query = f"{query}\n\nPlease provide a comprehensive, detailed explanation in a natural, conversational way."
+        else:
+            # Default to concise response with option to elaborate
+            current_query = f"{query}\n\nPlease respond in a natural, conversational way with a smart, concise answer (1-2 paragraphs). If I want more detail, I can ask for elaboration."
         
         messages.append(Message(
             role=MessageRole.USER,
@@ -152,7 +151,7 @@ Always prioritize precision over length"""
             truncated_content = content[:400] + "..." if len(content) > 400 else content
             context_parts.append(f"   {truncated_content}")
         
-        context_parts.append("\nUse this relevant context from this conversation to provide more accurate and contextual responses. Reference the relevant previous messages when appropriate.")
+        context_parts.append("\nUse this relevant context from this conversation to provide more accurate and contextual responses.")
         
         return Message(
             role=MessageRole.SYSTEM,
@@ -238,18 +237,7 @@ class PromptOptimizer:
     
     def enhance_query_clarity(self, query: str) -> str:
         """Enhance query clarity for better responses."""
-        # Add clarifying context for common ambiguous queries
-        query_lower = query.lower()
-        
-        if "how" in query_lower and "reduce" in query_lower:
-            return f"{query} Please provide specific, actionable steps and examples."
-        elif "what" in query_lower and "best" in query_lower:
-            return f"{query} Please include criteria for evaluation and practical considerations."
-        elif "compare" in query_lower:
-            return f"{query} Please provide a structured comparison with pros and cons."
-        elif "explain" in query_lower:
-            return f"{query} Please provide clear explanations with examples and context."
-        
+        # Return the query as-is to maintain natural conversation flow
         return query
 
 
@@ -299,3 +287,7 @@ class PromptManager:
     def create_refusal_prompt(self, reason: str) -> str:
         """Create a polite refusal prompt for non-sustainability queries."""
         return self.template.build_refusal_prompt(reason)
+    
+    def get_system_prompt(self) -> str:
+        """Get the system prompt for the sustainability assistant."""
+        return self.template.system_prompt

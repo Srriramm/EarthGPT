@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Plus, 
   MessageSquare, 
@@ -33,9 +33,11 @@ const Sidebar: React.FC<SidebarProps> = ({
   onToggleDarkMode,
   onToggleSidebar,
 }) => {
+  
   const truncateTitle = (title: string, maxLength: number = 30) => {
     return title.length > maxLength ? title.substring(0, maxLength) + '...' : title;
   };
+
 
   return (
     <>
@@ -175,9 +177,13 @@ const Sidebar: React.FC<SidebarProps> = ({
 
         {/* Footer */}
         <div className="p-4 border-t border-gray-200 dark:border-gray-700">
-          <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
-            <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse-green"></div>
-            <span><span className="earthgpt-brand"><span className="earth">Earth</span><span className="gpt">GPT</span></span> Online</span>
+          <div className="space-y-2">
+            {/* Online status */}
+            <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+              <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse-green"></div>
+              <span><span className="earthgpt-brand"><span className="earth">Earth</span><span className="gpt">GPT</span></span> Online</span>
+            </div>
+            
           </div>
         </div>
       </div>
