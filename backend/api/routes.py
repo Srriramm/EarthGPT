@@ -4,7 +4,6 @@ from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
 from fastapi.responses import JSONResponse
 from typing import List, Dict, Any, Optional
 from datetime import datetime
-import re
 from loguru import logger
 
 from models.schemas import (
@@ -78,11 +77,20 @@ async def chat(
                     "relationship", "dating", "marriage", "family", "personal"
                 ]
                 
+                # Check if this is a memory-related question first
+                memory_indicators = [
+                    "remember", "recall", "do you remember", "did we discuss", "you mentioned", 
+                    "you said", "earlier you", "previously", "before you", "in our conversation",
+                    "what did you", "you told me", "you explained", "you suggested"
+                ]
+                is_memory_question = any(indicator in query_lower for indicator in memory_indicators)
+                
                 # If query contains obvious non-sustainability terms, block immediately
+                # UNLESS it's a memory question or has sustainability indicators
                 if any(term in query_lower for term in obvious_non_sustainability):
                     # Check if it's actually about sustainability (e.g., "sustainable finance")
                     sustainability_indicators = ["sustainable", "green", "eco", "environmental", "climate", "carbon", "renewable", "esg"]
-                    if not any(indicator in query_lower for indicator in sustainability_indicators):
+                    if not any(indicator in query_lower for indicator in sustainability_indicators) and not is_memory_question:
                         logger.warning(f"Fast path: Non-sustainability query blocked: {request.message[:100]}...")
                         return ConversationResponseWithUser(
                             response="I'm specialized in sustainability topics. Please ask me about environmental issues, climate change, renewable energy, sustainable practices, or related topics.",

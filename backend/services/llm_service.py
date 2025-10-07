@@ -1,7 +1,6 @@
 """LLM service for handling Claude API integration with token management and memory tool."""
 
 import os
-import json
 import time
 from typing import List, Dict, Any, Optional, Tuple
 from pathlib import Path
@@ -12,6 +11,8 @@ from config import settings
 from core.token_manager import ContextWindowManager, TokenCounter
 from core.claude_memory_tool import claude_memory_tool_handler
 from core.mongodb_memory import mongodb_session_manager
+from core.cache_manager import cache_manager
+from core.error_handler import error_handler
 
 
 class LLMService:
@@ -44,6 +45,22 @@ class LLMService:
             time.sleep(sleep_time)
         
         self.last_request_time = time.time()
+    
+    def _get_beta_headers(self):
+        """Get beta headers for enabled tools."""
+        extra_headers = {}
+        beta_features = []
+        
+        if settings.enable_claude_memory_tool:
+            beta_features.append("context-management-2025-06-27")
+        
+        if settings.enable_web_fetch_tool:
+            beta_features.append("web-fetch-2025-09-10")
+        
+        if beta_features:
+            extra_headers["anthropic-beta"] = ",".join(beta_features)
+        
+        return extra_headers
     
     def _extract_usage_info(self, response) -> Dict[str, Any]:
         """
@@ -142,6 +159,21 @@ class LLMService:
             # Format messages for Claude API
             formatted_messages, system_prompt = self._format_messages_for_claude(messages)
             
+            # Check cache first if caching is enabled
+            if settings.enable_prompt_caching:
+                cache_manager.increment_cache_request()
+                cached_response = cache_manager.get_cached_response(
+                    formatted_messages, 
+                    self.model_name, 
+                    max_tokens or settings.max_tokens, 
+                    temperature or settings.temperature
+                )
+                
+                if cached_response:
+                    cache_manager.increment_cache_hit()
+                    logger.info("Returning cached response")
+                    return cached_response
+            
             # Calculate token usage and validate request
             expected_output_tokens = max_tokens or settings.max_tokens
             if is_detailed:
@@ -191,6 +223,9 @@ class LLMService:
                 "messages": formatted_messages
             }
             
+            # Note: cache_control parameter is not supported in the current API version
+            # Caching is handled client-side through our cache manager
+            
             # Add system prompt if available
             if system_prompt:
                 api_params["system"] = system_prompt
@@ -198,11 +233,38 @@ class LLMService:
             # Add tools if enabled
             tools = []
             
+            # Add web fetch tool if enabled
+            if settings.enable_web_fetch_tool:
+                web_fetch_tool = {
+                    "type": "web_fetch_20250910",
+                    "name": "web_fetch",
+                    "max_uses": settings.web_fetch_max_uses
+                }
+                tools.append(web_fetch_tool)
+            
+            # Add web search tool if enabled
+            if settings.enable_web_search_tool:
+                web_search_tool = {
+                    "type": "web_search_20250305",
+                    "name": "web_search",
+                    "max_uses": settings.web_search_max_uses
+                }
+                tools.append(web_search_tool)
+            
+            # Add text editor tool if enabled (for Claude 4 models)
+            if settings.enable_text_editor_tool:
+                text_editor_tool = {
+                    "type": "text_editor_20250728",
+                    "name": "str_replace_based_edit_tool",
+                    "max_characters": settings.text_editor_max_characters
+                }
+                tools.append(text_editor_tool)
+            
             # Add custom memory tool if enabled
             if settings.enable_claude_memory_tool:
                 # Define custom memory tool
                 memory_tool = {
-                    "name": "memory_manager",
+                    "name": "memory",
                     "description": "Manage persistent memory storage for user information and context",
                     "input_schema": {
                         "type": "object",
@@ -258,8 +320,8 @@ class LLMService:
             # Apply rate limiting
             self._rate_limit()
             
-            # Use standard API
-            response = self.client.messages.create(**api_params)
+            # Use standard API with beta headers
+            response = self.client.messages.create(**api_params, extra_headers=self._get_beta_headers())
             
             # Log initial API call usage
             initial_usage = self._extract_usage_info(response)
@@ -276,7 +338,7 @@ class LLMService:
                         tool_calls.append(content_block)
                         # Track which tools were used
                         if hasattr(content_block, 'name'):
-                            if content_block.name == 'memory_manager':
+                            if content_block.name == 'memory':
                                 memory_used = True
                 
                 if tool_calls:
@@ -308,8 +370,8 @@ class LLMService:
             # Extract comprehensive usage information from Claude API response
             final_usage = self._extract_usage_info(response)
             
-            logger.debug(f"Generated response length: {len(response_text)}")
-            return {
+            # Prepare response data
+            response_data = {
                 "response": response_text,
                 "error": None,
                 "memory_used": False,
@@ -317,39 +379,31 @@ class LLMService:
                 "tokens_used": response_tokens
             }
             
+            # Cache the response if caching is enabled
+            if settings.enable_prompt_caching:
+                cache_manager.cache_response(
+                    formatted_messages,
+                    self.model_name,
+                    max_tokens or settings.max_tokens,
+                    temperature or settings.temperature,
+                    response_data
+                )
+            
+            logger.debug(f"Generated response length: {len(response_text)}")
+            return response_data
+            
         except Exception as e:
-            logger.error(f"Error generating response from Claude: {e}")
+            # Use enhanced error handler
+            error_info = error_handler.handle_claude_api_error(e)
             
-            # Handle rate limit errors specifically
-            if "rate_limit_error" in str(e) or "429" in str(e):
-                logger.warning("Rate limit exceeded, returning helpful message to user")
-                return {
-                    "response": "I'm currently experiencing high demand. Please wait a moment and try again. The rate limit will reset shortly.",
-                    "error": "Rate limit exceeded",
-                    "usage_info": {},
-                    "tokens_used": 0
-                }
-            
-            # Handle specific error types
-            error_msg = str(e).lower()
-            if "quota" in error_msg or "429" in error_msg:
-                return {
-                    "response": "I'm sorry, the Claude API quota has been exceeded. Please check your API quota limits and try again later.",
-                    "error": "quota_exceeded",
-                    "usage_info": {}
-                }
-            elif "context" in error_msg or "token" in error_msg:
-                return {
-                    "response": "I'm sorry, this conversation has become too long for me to process. Please start a new conversation or ask a more focused question.",
-                    "error": "context_window_exceeded",
-                    "usage_info": {}
-                }
-            else:
-                return {
-                    "response": "I'm sorry, I encountered an error while generating a response. Please try again.",
-                    "error": "unknown_error",
-                    "usage_info": {}
-                }
+            return {
+                "response": error_info["message"],
+                "error": error_info["error"],
+                "usage_info": {},
+                "tokens_used": 0,
+                "retry_recommended": error_info["retry_recommended"],
+                "retry_after_seconds": error_info["retry_after_seconds"]
+            }
     
     async def _handle_tool_calls_and_continue(self, response, tool_calls, session_id: Optional[str], api_params: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -387,7 +441,7 @@ class LLMService:
                             "type": "text",
                             "text": content_block.text
                         })
-                    elif content_block.type == 'tool_use' and content_block.name == 'memory_manager':
+                    elif content_block.type == 'tool_use' and content_block.name == 'memory':
                         # Only add client tools to conversation - server tools are handled internally
                         claude_message["content"].append({
                             "type": "tool_use",
@@ -403,7 +457,7 @@ class LLMService:
             memory_used = False
             
             for tool_call in tool_calls:
-                if tool_call.name == 'memory_manager':
+                if tool_call.name == 'memory':
                     memory_used = True
                     # Execute memory tool call
                     tool_result = await self._handle_memory_tool_call(tool_call.input, session_id)
@@ -445,7 +499,8 @@ class LLMService:
             # Make another API call to get Claude's final response
             logger.info(f"Making continuation API call with {len(messages)} messages")
             self._rate_limit()
-            final_response = self.client.messages.create(**continue_params)
+            
+            final_response = self.client.messages.create(**continue_params, extra_headers=self._get_beta_headers())
             
             # Log continuation API call usage
             continuation_usage = self._extract_usage_info(final_response)
@@ -464,7 +519,7 @@ class LLMService:
                 # First, add the assistant's tool use to the conversation (only for client tools)
                 assistant_tool_use_content = []
                 for tool_call in additional_tool_calls:
-                    if tool_call.name == 'memory_manager':  # Only add client tools
+                    if tool_call.name == 'memory':  # Only add client tools
                         assistant_tool_use_content.append({
                             "type": "tool_use",
                             "id": tool_call.id,
@@ -481,7 +536,7 @@ class LLMService:
                 # Then execute tools and add results
                 additional_tool_results = []
                 for tool_call in additional_tool_calls:
-                    if tool_call.name == 'memory_manager':
+                    if tool_call.name == 'memory':
                         # Execute the tool
                         tool_result = await self._handle_memory_tool_call(tool_call.input, session_id)
                         
@@ -514,7 +569,8 @@ class LLMService:
                 
                 logger.info(f"Making final API call with {len(messages)} messages (keeping tools available)")
                 self._rate_limit()
-                final_response = self.client.messages.create(**final_params)
+                
+                final_response = self.client.messages.create(**final_params, extra_headers=self._get_beta_headers())
                 
                 # Log final API call usage
                 final_api_usage = self._extract_usage_info(final_response)
@@ -547,7 +603,7 @@ class LLMService:
                     logger.warning("No text blocks found in response, making another API call to get response")
                     
                     # Add a more specific user message to prompt for the response
-                    messages.append(Message(role=MessageRole.USER, content="Please provide a comprehensive and detailed response to the original question. Synthesize the information into a well-structured answer with specific examples and practical applications."))
+                    messages.append(Message(role=MessageRole.USER, content="Please provide a response to the original question."))
                     
                     # Make another API call without tools to force text response
                     final_params = continue_params.copy()
@@ -560,7 +616,8 @@ class LLMService:
                     
                     logger.info(f"Making final API call without tools to get text response")
                     self._rate_limit()
-                    text_response = self.client.messages.create(**final_params)
+                    
+                    text_response = self.client.messages.create(**final_params, extra_headers=self._get_beta_headers())
                     
                     # Log text response API call usage
                     text_usage = self._extract_usage_info(text_response)
@@ -599,25 +656,17 @@ class LLMService:
             }
             
         except Exception as e:
-            logger.error(f"Error handling tool calls and continuing conversation: {e}")
-            
-            # Handle rate limit errors specifically
-            if "rate_limit_error" in str(e) or "429" in str(e):
-                logger.warning("Rate limit exceeded during tool processing, returning helpful message to user")
-                return {
-                    "response": "I'm currently experiencing high demand. Please wait a moment and try again. The rate limit will reset shortly.",
-                    "error": "Rate limit exceeded",
-                    "usage_info": {},
-                    "tokens_used": 0,
-                    "tool_calls_processed": 0
-                }
+            # Use enhanced error handler
+            error_info = error_handler.handle_claude_api_error(e)
             
             return {
-                "response": "I apologize, but I encountered an error while processing memory operations. Please try again.",
-                "error": str(e),
+                "response": error_info["message"],
+                "error": error_info["error"],
                 "usage_info": {},
                 "tokens_used": 0,
-                "tool_calls_processed": 0
+                "tool_calls_processed": 0,
+                "retry_recommended": error_info["retry_recommended"],
+                "retry_after_seconds": error_info["retry_after_seconds"]
             }
     
     async def _handle_memory_tool_call(self, tool_input: Dict[str, Any], session_id: Optional[str] = None) -> Dict[str, Any]:
@@ -641,11 +690,12 @@ class LLMService:
             return result
             
         except Exception as e:
-            logger.error(f"Error handling memory tool call: {e}")
+            # Use enhanced error handler for tool errors
+            error_info = error_handler.handle_tool_error("memory", e)
             return {
                 "success": False,
-                "error": str(e),
-                "content": ""
+                "error": error_info["error"],
+                "content": error_info["message"]
             }
     
     def _format_messages_for_claude(self, messages: List[Message]) -> Tuple[List[Dict[str, str]], str]:
@@ -659,51 +709,9 @@ class LLMService:
                 system_prompt = message.content
                 break
         
-        # Add default system prompt if none found
+        # Add default system prompt if none found (simplified to avoid conflicts)
         if not system_prompt:
-            system_prompt = """You are EarthGPT, a friendly and knowledgeable sustainability expert. You help people understand environmental topics, climate solutions, and sustainable practices in a natural, conversational way.
-
-RESPONSE STRATEGY:
-- Start with a smart, concise answer (1-2 paragraphs) that covers the key points
-- If the user wants more detail, they can ask for elaboration
-- Only provide detailed explanations when specifically requested
-- Be conversational and natural, like talking to a knowledgeable friend
-
-CRITICAL: You must respond in a natural, conversational style. Do NOT use bullet points, numbered lists, or formal section headers. Write like you're talking to a friend, not writing a corporate report.
-
-You're great at explaining complex sustainability topics in simple terms, and you can dive deep when someone needs detailed information. You cover everything from renewable energy and climate change to ESG reporting and green technology.
-
-IMPORTANT RESPONSE GUIDELINES:
-- Write like you're having a conversation with a friend, not writing a formal report
-- Avoid bullet points, numbered lists, and formal section headers unless absolutely necessary
-- Use natural language and flow from one idea to the next
-- Be conversational and engaging, not corporate or academic
-- If you need to organize information, do it naturally within paragraphs
-- Use "you" and "we" to make it personal and relatable
-- Keep it human and approachable, even for complex topics
-
-MEMORY TOOL USAGE
-You have access to a memory_manager tool that allows you to:
-- Store and retrieve information across conversations
-- Create, read, update, and delete files in the /memories directory
-- Build long-term knowledge bases for users
-- Remember user preferences and context
-
-When to use the memory_manager tool:
-- Store important information the user shares about their organization, projects, or preferences
-- Create reference documents for complex topics discussed
-- Save user-specific guidance or templates
-- Remember context from previous conversations
-
-Memory tool commands available:
-- view: View directory or file contents
-- create: Create/overwrite a file
-- str_replace: Replace text in a file
-- insert: Insert text at a specific line
-- delete: Delete file/directory
-- rename: Rename/move file or directory
-
-Always check /memories first before starting tasks to see what context is available."""
+            system_prompt = "You are EarthGPT, a sustainability expert. Respond naturally and conversationally."
         
         # Convert messages to Claude format, properly handling system messages
         for message in messages:
@@ -737,6 +745,223 @@ Always check /memories first before starting tasks to see what context is availa
         result = self.generate_response(messages, max_tokens, temperature, is_detailed, session_id)
         return result.get("response", "I'm sorry, I couldn't generate a response.")
     
+    async def generate_response_streaming(
+        self, 
+        messages: List[Message], 
+        max_tokens: Optional[int] = None,
+        temperature: Optional[float] = None,
+        is_detailed: bool = False,
+        session_id: Optional[str] = None
+    ):
+        """
+        Generate a streaming response from Claude API.
+        
+        Args:
+            messages: List of conversation messages
+            max_tokens: Maximum tokens to generate
+            temperature: Sampling temperature
+            is_detailed: Whether to generate a detailed response
+            session_id: Session ID for memory tool context
+            
+        Yields:
+            Dictionary with streaming response chunks
+        """
+        if not self.is_loaded:
+            logger.error("Claude API client not initialized, attempting to initialize...")
+            if not self.load_model():
+                logger.error("Failed to initialize Claude API client")
+                yield {
+                    "type": "error",
+                    "content": "I'm sorry, the Claude API is not currently available. Please check your API key and try again later.",
+                    "error": "api_not_available"
+                }
+                return
+        
+        try:
+            # Format messages for Claude API
+            formatted_messages, system_prompt = self._format_messages_for_claude(messages)
+            
+            # Calculate token usage and validate request
+            expected_output_tokens = max_tokens or settings.max_tokens
+            if is_detailed:
+                expected_output_tokens = min(expected_output_tokens * 2, 4096)
+            
+            # Validate context window
+            validation = self.context_manager.validate_request(formatted_messages, expected_output_tokens)
+            
+            if not validation["valid"]:
+                logger.warning(f"Request exceeds context window: {validation['usage_info']}")
+                yield {
+                    "type": "error",
+                    "content": "I'm sorry, this conversation has become too long for me to process effectively. Please start a new conversation or ask a more focused question.",
+                    "error": "context_window_exceeded",
+                    "usage_info": validation["usage_info"],
+                    "recommendations": validation["recommendations"]
+                }
+                return
+            
+            # Truncate if needed
+            if self.context_manager.should_truncate(formatted_messages, expected_output_tokens):
+                logger.info("Truncating conversation to fit context window")
+                formatted_messages, truncation_info = self.context_manager.truncate_conversation(
+                    formatted_messages, expected_output_tokens
+                )
+                logger.info(f"Truncation info: {truncation_info}")
+            
+            # Get optimal output tokens
+            optimal_tokens = self.context_manager.get_optimal_output_tokens(formatted_messages)
+            response_tokens = min(expected_output_tokens, optimal_tokens)
+            
+            # Prepare API parameters
+            api_params = {
+                "model": self.model_name,
+                "max_tokens": response_tokens,
+                "temperature": temperature or settings.temperature,
+                "messages": formatted_messages,
+                "stream": True  # Enable streaming
+            }
+            
+            # Add system prompt if available
+            if system_prompt:
+                api_params["system"] = system_prompt
+            
+            # Add tools if enabled
+            tools = []
+            
+            # Add web fetch tool if enabled
+            if settings.enable_web_fetch_tool:
+                web_fetch_tool = {
+                    "type": "web_fetch_20250910",
+                    "name": "web_fetch",
+                    "max_uses": settings.web_fetch_max_uses
+                }
+                tools.append(web_fetch_tool)
+            
+            # Add web search tool if enabled
+            if settings.enable_web_search_tool:
+                web_search_tool = {
+                    "type": "web_search_20250305",
+                    "name": "web_search",
+                    "max_uses": settings.web_search_max_uses
+                }
+                tools.append(web_search_tool)
+            
+            # Add text editor tool if enabled (for Claude 4 models)
+            if settings.enable_text_editor_tool:
+                text_editor_tool = {
+                    "type": "text_editor_20250728",
+                    "name": "str_replace_based_edit_tool",
+                    "max_characters": settings.text_editor_max_characters
+                }
+                tools.append(text_editor_tool)
+            
+            # Add custom memory tool if enabled
+            if settings.enable_claude_memory_tool:
+                # Define custom memory tool
+                memory_tool = {
+                    "name": "memory",
+                    "description": "Manage persistent memory storage for user information and context",
+                    "input_schema": {
+                        "type": "object",
+                        "properties": {
+                            "command": {
+                                "type": "string",
+                                "enum": ["view", "create", "str_replace", "insert", "delete", "rename"],
+                                "description": "The memory operation to perform"
+                            },
+                            "path": {
+                                "type": "string",
+                                "description": "File or directory path in memory storage"
+                            },
+                            "file_text": {
+                                "type": "string",
+                                "description": "Text content for create operations"
+                            },
+                            "old_str": {
+                                "type": "string",
+                                "description": "Text to replace in str_replace operations"
+                            },
+                            "new_str": {
+                                "type": "string",
+                                "description": "New text for str_replace operations"
+                            },
+                            "insert_line": {
+                                "type": "integer",
+                                "description": "Line number for insert operations"
+                            },
+                            "insert_text": {
+                                "type": "string",
+                                "description": "Text to insert"
+                            },
+                            "old_path": {
+                                "type": "string",
+                                "description": "Original path for rename operations"
+                            },
+                            "new_path": {
+                                "type": "string",
+                                "description": "New path for rename operations"
+                            }
+                        },
+                        "required": ["command", "path"]
+                    }
+                }
+                tools.append(memory_tool)
+            
+            # Set tools if any are enabled
+            if tools:
+                api_params["tools"] = tools
+            
+            # Apply rate limiting
+            self._rate_limit()
+            
+            # Stream the response
+            async with self.client.messages.stream(**api_params, extra_headers=self._get_beta_headers()) as stream:
+                async for chunk in stream:
+                    if chunk.type == "content_block_delta":
+                        yield {
+                            "type": "content",
+                            "content": chunk.delta.text,
+                            "chunk_id": getattr(chunk, 'index', 0)
+                        }
+                    elif chunk.type == "message_start":
+                        yield {
+                            "type": "message_start",
+                            "message_id": chunk.message.id,
+                            "model": chunk.message.model
+                        }
+                    elif chunk.type == "message_delta":
+                        if hasattr(chunk, 'usage') and chunk.usage:
+                            yield {
+                                "type": "usage",
+                                "usage": {
+                                    "input_tokens": getattr(chunk.usage, 'input_tokens', 0),
+                                    "output_tokens": getattr(chunk.usage, 'output_tokens', 0),
+                                    "total_tokens": getattr(chunk.usage, 'input_tokens', 0) + getattr(chunk.usage, 'output_tokens', 0)
+                                }
+                            }
+                    elif chunk.type == "message_stop":
+                        yield {
+                            "type": "message_stop",
+                            "stop_reason": getattr(chunk, 'stop_reason', 'end_turn')
+                        }
+                    elif chunk.type == "error":
+                        yield {
+                            "type": "error",
+                            "content": f"Streaming error: {chunk.error}",
+                            "error": chunk.error
+                        }
+                        
+        except Exception as e:
+            # Use enhanced error handler
+            error_info = error_handler.handle_claude_api_error(e)
+            yield {
+                "type": "error",
+                "content": error_info["message"],
+                "error": error_info["error"],
+                "retry_recommended": error_info["retry_recommended"],
+                "retry_after_seconds": error_info["retry_after_seconds"]
+            }
+
     def get_model_info(self) -> Dict[str, Any]:
         """Get information about the Claude API configuration."""
         return {
@@ -747,7 +972,8 @@ Always check /memories first before starting tasks to see what context is availa
             "temperature": settings.temperature,
             "has_api_key": bool(self.api_key),
             "context_window": self.context_manager.config.max_context_tokens,
-            "max_output_tokens": self.context_manager.config.max_output_tokens
+            "max_output_tokens": self.context_manager.config.max_output_tokens,
+            "streaming_enabled": settings.enable_streaming
         }
 
 

@@ -8,7 +8,6 @@ from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from loguru import logger
-import uvicorn
 
 from api.routes import router
 from api.auth_routes import router as auth_router
@@ -153,6 +152,7 @@ async def log_requests(request: Request, call_next):
 
 
 if __name__ == "__main__":
+    import uvicorn
     logger.info(f"Starting server on {settings.api_host}:{settings.api_port}")
     uvicorn.run(
         "main:app",

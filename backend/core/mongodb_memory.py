@@ -5,7 +5,6 @@ This module replaces the file-based memory system with a clean MongoDB-only appr
 that integrates with the existing ChatSessionModel and adds memory management capabilities.
 """
 
-import json
 import uuid
 from typing import Dict, List, Optional, Any, Tuple
 from datetime import datetime, timedelta
@@ -150,6 +149,31 @@ class MongoDBSessionManager:
             
         except Exception as e:
             logger.error(f"Failed to update session activity for {session_id}: {e}")
+            return False
+    
+    async def update_session_title(self, session_id: str, new_title: str) -> bool:
+        """Update the title of a chat session."""
+        try:
+            # Get session info first to get user_id
+            session_info = await self.get_session_info(session_id)
+            if not session_info:
+                logger.warning(f"Session {session_id} not found for title update")
+                return False
+            
+            user_id = session_info["user_id"]
+            
+            # Update in ChatSessionModel
+            success = await self.session_model.update_session_title(session_id, user_id, new_title)
+            
+            if success:
+                logger.info(f"Updated title for session {session_id} to: {new_title}")
+            else:
+                logger.warning(f"Failed to update title for session {session_id}")
+            
+            return success
+            
+        except Exception as e:
+            logger.error(f"Failed to update session title for {session_id}: {e}")
             return False
     
     async def add_message_to_session(self, session_id: str, role: MessageRole, content: str) -> bool:

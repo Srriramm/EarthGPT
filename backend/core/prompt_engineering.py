@@ -121,10 +121,10 @@ You have access to memory tools to remember information from previous conversati
         
         if wants_detail:
             # User explicitly wants detailed response
-            current_query = f"{query}\n\nPlease provide a comprehensive, detailed explanation in a natural, conversational way."
+            current_query = query
         else:
             # Default to concise response with option to elaborate
-            current_query = f"{query}\n\nPlease respond in a natural, conversational way with a smart, concise answer (1-2 paragraphs). If I want more detail, I can ask for elaboration."
+            current_query = query
         
         messages.append(Message(
             role=MessageRole.USER,

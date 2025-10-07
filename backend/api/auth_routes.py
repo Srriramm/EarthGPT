@@ -11,7 +11,6 @@ from models.user import user_model, chat_session_model
 from auth.dependencies import get_current_active_user
 from config import settings
 from loguru import logger
-from core.smart_memory import smart_memory_manager
 
 router = APIRouter(prefix="/auth", tags=["authentication"])
 

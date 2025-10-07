@@ -365,6 +365,3 @@ class ChatSessionModel:
 user_model = UserModel()
 chat_session_model = ChatSessionModel()
 
-
-
-
