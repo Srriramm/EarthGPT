@@ -4,34 +4,26 @@ from typing import List, Dict, Any, Optional
 from loguru import logger
 from models.schemas import Message, MessageRole
 
+# Constants
+MAX_HISTORY_ITEMS = 6  # Last 3 exchanges (user+assistant pairs)
+CONTENT_TRUNCATION_LENGTH = 400  # Characters to truncate content to
+TOKEN_ESTIMATION_RATIO = 4  # Rough approximation: 1 token ≈ 4 characters
+MAX_CONTEXT_TOKENS = 8000  # Maximum tokens for context
+
 
 class PromptTemplate:
     """Template for generating prompts with context and instructions."""
     
     def __init__(self):
         
-        self.system_prompt = """You are EarthGPT, a friendly and knowledgeable sustainability expert. You help people understand environmental topics, climate solutions, and sustainable practices in a natural, conversational way.
+        self.system_prompt = """You are EarthGPT, a friendly sustainability expert. Help people understand environmental topics, climate solutions, and sustainable practices conversationally.
 
 RESPONSE STRATEGY:
-- Start with a smart, concise answer (1-2 paragraphs) that covers the key points
-- If the user wants more detail, they can ask for elaboration
-- Only provide detailed explanations when specifically requested
+- Start with brief answers (1-2 paragraphs) covering key points
+- Provide detailed explanations only when users ask for elaboration
 - Be conversational and natural, like talking to a knowledgeable friend
 
-CRITICAL: You must respond in a natural, conversational style. Do NOT use bullet points, numbered lists, or formal section headers. Write like you're talking to a friend, not writing a corporate report.
-
-You're great at explaining complex sustainability topics in simple terms, and you can dive deep when someone needs detailed information. You cover everything from renewable energy and climate change to ESG reporting and green technology.
-
-IMPORTANT RESPONSE GUIDELINES:
-- Write like you're having a conversation with a friend, not writing a formal report
-- Avoid bullet points, numbered lists, and formal section headers unless absolutely necessary
-- Use natural language and flow from one idea to the next
-- Be conversational and engaging, not corporate or academic
-- If you need to organize information, do it naturally within paragraphs
-- Use "you" and "we" to make it personal and relatable
-- Keep it human and approachable, even for complex topics
-
-You have access to memory tools to remember information from previous conversations, so you can build on what we've discussed before."""
+Write naturally in paragraphs, avoid bullet points and formal headers. Use "you" and "we" to make it personal. You have memory tools to remember previous conversations."""
 
         logger.info("Prompt manager initialized")
     
@@ -68,10 +60,9 @@ You have access to memory tools to remember information from previous conversati
             
             # CRITICAL FIX: Limit conversation history to prevent context pollution
             # Keep only the most recent conversation turns to avoid old topics influencing responses
-            max_history_items = 6  # Last 3 exchanges (user+assistant pairs)
-            if len(history) > max_history_items:
+            if len(history) > MAX_HISTORY_ITEMS:
                 # Keep only the most recent exchanges
-                recent_history = history[-max_history_items:]
+                recent_history = history[-MAX_HISTORY_ITEMS:]
                 logger.info(f"Limited conversation history to {len(recent_history)} recent messages to prevent context pollution")
             else:
                 recent_history = history
@@ -148,7 +139,7 @@ You have access to memory tools to remember information from previous conversati
                 context_parts.append(f"   (From earlier in this conversation)")
             
             # Truncate content to keep context manageable
-            truncated_content = content[:400] + "..." if len(content) > 400 else content
+            truncated_content = content[:CONTENT_TRUNCATION_LENGTH] + "..." if len(content) > CONTENT_TRUNCATION_LENGTH else content
             context_parts.append(f"   {truncated_content}")
         
         context_parts.append("\nUse this relevant context from this conversation to provide more accurate and contextual responses.")
@@ -179,7 +170,7 @@ class PromptOptimizer:
     
     def __init__(self):
         self.optimization_rules = {
-            "length": 8000,  # Max tokens for context
+            "length": MAX_CONTEXT_TOKENS,  # Max tokens for context
             "clarity": True,
             "specificity": True,
             "actionability": True
@@ -207,7 +198,7 @@ class PromptOptimizer:
                 content = message.get('content', '')
             
             # Estimate token count (rough approximation: 1 token ≈ 4 characters)
-            message_tokens = len(content) // 4
+            message_tokens = len(content) // TOKEN_ESTIMATION_RATIO
             
             if total_length + message_tokens > self.optimization_rules["length"]:
                 # Truncate or skip if we're approaching token limit
@@ -215,7 +206,7 @@ class PromptOptimizer:
                     # Keep system message but truncate if necessary
                     remaining_tokens = self.optimization_rules["length"] - total_length
                     if remaining_tokens > 100:  # Keep some buffer
-                        truncated_content = content[:remaining_tokens * 4]
+                        truncated_content = content[:remaining_tokens * TOKEN_ESTIMATION_RATIO]
                         optimized_messages.append(Message(
                             role=message.role,
                             content=truncated_content + "..."

@@ -7,14 +7,18 @@ from models.schemas import Message
 from services.llm_service import llm_service
 from config import settings
 
+# Constants
+DEFAULT_MAX_BATCH_SIZE = 10  # Default maximum number of requests per batch
+DEFAULT_MAX_CONCURRENT_REQUESTS = 5  # Default maximum concurrent requests
+
 
 class BatchService:
     """Service for handling batch requests to Claude API."""
     
     def __init__(self):
         """Initialize the batch service."""
-        self.max_batch_size = 10  # Maximum number of requests per batch
-        self.max_concurrent_requests = 5  # Maximum concurrent requests
+        self.max_batch_size = DEFAULT_MAX_BATCH_SIZE
+        self.max_concurrent_requests = DEFAULT_MAX_CONCURRENT_REQUESTS
         
         logger.info(f"Batch service initialized with max batch size: {self.max_batch_size}")
     

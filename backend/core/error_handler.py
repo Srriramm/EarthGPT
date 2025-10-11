@@ -1,9 +1,28 @@
 """Enhanced error handling for Claude API and tools."""
 
 import re
-from typing import Dict, Any, Optional, Tuple
+from typing import Dict, Any, Optional, Tuple, List
 from loguru import logger
 from config import settings
+
+# Constants for retry delays
+RETRY_DELAYS = {
+    "rate_limit": 60,  # 1 minute
+    "quota_exceeded": 3600,  # 1 hour
+    "network_error": 30,  # 30 seconds
+    "context_window": 0,  # No retry
+    "authentication": 0,  # No retry
+    "model_not_found": 0,  # No retry
+    "tool_error": 10,  # 10 seconds
+    "unknown_error": 30  # 30 seconds
+}
+
+MAX_RETRIES = {
+    "rate_limit": 3,
+    "network_error": 2,
+    "tool_error": 2,
+    "unknown_error": 1
+}
 
 
 class ClaudeErrorHandler:
@@ -170,18 +189,7 @@ class ClaudeErrorHandler:
     
     def _get_retry_delay(self, error_category: str) -> int:
         """Get recommended retry delay in seconds for different error categories."""
-        retry_delays = {
-            "rate_limit": 60,  # 1 minute
-            "quota_exceeded": 3600,  # 1 hour
-            "network_error": 30,  # 30 seconds
-            "context_window": 0,  # No retry
-            "authentication": 0,  # No retry
-            "model_not_found": 0,  # No retry
-            "tool_error": 10,  # 10 seconds
-            "unknown_error": 30  # 30 seconds
-        }
-        
-        return retry_delays.get(error_category, 30)
+        return RETRY_DELAYS.get(error_category, 30)
     
     def should_retry(self, error_category: str, retry_count: int = 0) -> bool:
         """
@@ -194,17 +202,10 @@ class ClaudeErrorHandler:
         Returns:
             True if should retry, False otherwise
         """
-        max_retries = {
-            "rate_limit": 3,
-            "network_error": 2,
-            "tool_error": 2,
-            "unknown_error": 1
-        }
-        
-        if error_category not in max_retries:
+        if error_category not in MAX_RETRIES:
             return False
         
-        return retry_count < max_retries[error_category]
+        return retry_count < MAX_RETRIES[error_category]
     
     def get_error_stats(self) -> Dict[str, Any]:
         """Get error handling statistics."""

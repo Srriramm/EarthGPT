@@ -7,6 +7,10 @@ from typing import Dict, Any, Optional, List
 from loguru import logger
 from config import settings
 
+# Constants
+CACHE_CLEANUP_PERCENTAGE = 0.1  # Remove 10% of oldest entries when cleaning up
+CACHE_KEY_PREFIX_LENGTH = 8  # Length of cache key prefix for logging
+
 
 class PromptCacheManager:
     """Manages prompt caching for Claude API responses."""
@@ -29,9 +33,9 @@ class PromptCacheManager:
             "temperature": temperature
         }
         
-        # Convert to JSON string and hash
+        # Convert to JSON string and hash using SHA-256 for better security
         cache_string = json.dumps(cache_data, sort_keys=True)
-        return hashlib.md5(cache_string.encode()).hexdigest()
+        return hashlib.sha256(cache_string.encode()).hexdigest()
     
     def get_cached_response(self, messages: List[Dict[str, Any]], model: str, max_tokens: int, temperature: float) -> Optional[Dict[str, Any]]:
         """Get a cached response if available and not expired."""
@@ -42,12 +46,12 @@ class PromptCacheManager:
             
             # Check if cache entry is still valid
             if time.time() - cached_item["timestamp"] < self.cache_ttl:
-                logger.info(f"Cache hit for key: {cache_key[:8]}...")
+                logger.info(f"Cache hit for key: {cache_key[:CACHE_KEY_PREFIX_LENGTH]}...")
                 return cached_item["response"]
             else:
                 # Remove expired entry
                 del self.cache[cache_key]
-                logger.info(f"Cache entry expired for key: {cache_key[:8]}...")
+                logger.info(f"Cache entry expired for key: {cache_key[:CACHE_KEY_PREFIX_LENGTH]}...")
         
         return None
     
@@ -68,7 +72,7 @@ class PromptCacheManager:
             "temperature": temperature
         }
         
-        logger.info(f"Cached response for key: {cache_key[:8]}... (total entries: {len(self.cache)})")
+        logger.info(f"Cached response for key: {cache_key[:CACHE_KEY_PREFIX_LENGTH]}... (total entries: {len(self.cache)})")
     
     def _cleanup_old_entries(self) -> None:
         """Remove old cache entries to stay within limits."""
@@ -90,8 +94,8 @@ class PromptCacheManager:
                 key=lambda x: x[1]["timestamp"]
             )
             
-            # Remove oldest 10% of entries
-            remove_count = max(1, len(sorted_items) // 10)
+            # Remove oldest entries based on cleanup percentage
+            remove_count = max(1, int(len(sorted_items) * CACHE_CLEANUP_PERCENTAGE))
             for key, _ in sorted_items[:remove_count]:
                 del self.cache[key]
         

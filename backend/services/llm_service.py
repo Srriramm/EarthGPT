@@ -2,7 +2,7 @@
 
 import os
 import time
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional, Tuple, AsyncGenerator
 from pathlib import Path
 from anthropic import Anthropic
 from loguru import logger
@@ -13,6 +13,13 @@ from core.claude_memory_tool import claude_memory_tool_handler
 from core.mongodb_memory import mongodb_session_manager
 from core.cache_manager import cache_manager
 from core.error_handler import error_handler
+
+# Constants
+MIN_REQUEST_INTERVAL = 2  # Minimum 2 seconds between requests
+DETAILED_RESPONSE_MULTIPLIER = 2  # Multiply tokens for detailed responses
+BRIEF_RESPONSE_LIMIT = 1000  # Token limit for brief responses
+CONTINUATION_TOKEN_MINIMUM = 2000  # Minimum tokens for continuation calls
+FINAL_CALL_TOKEN_LIMIT = 3000  # Token limit for final API calls
 
 
 class LLMService:
@@ -30,7 +37,7 @@ class LLMService:
         
         # Rate limiting
         self.last_request_time = 0
-        self.min_request_interval = 2  # Minimum 2 seconds between requests
+        self.min_request_interval = MIN_REQUEST_INTERVAL
         
         logger.info(f"LLM Service initialized with Claude model: {self.model_name}")
     
@@ -176,8 +183,34 @@ class LLMService:
             
             # Calculate token usage and validate request
             expected_output_tokens = max_tokens or settings.max_tokens
-            if is_detailed:
-                expected_output_tokens = min(expected_output_tokens * 2, 4096)
+            
+            # Check if user is asking for detailed response based on their message
+            user_message = ""
+            if formatted_messages:
+                for msg in reversed(formatted_messages):
+                    if msg.get("role") == "user" or (hasattr(msg, 'role') and msg.role == MessageRole.USER):
+                        user_message = msg.get("content", "") if isinstance(msg, dict) else (msg.content if hasattr(msg, 'content') else str(msg))
+                        break
+            
+            # Detect elaboration requests
+            elaboration_indicators = [
+                "detailed", "comprehensive", "thorough", "in depth", "elaborate", 
+                "explain in detail", "tell me more", "more information", "full explanation",
+                "step by step", "how exactly", "what are the", "list all", "give me all",
+                "break down", "walk me through", "explain how", "show me how", "describe in detail",
+                "give me details", "more details", "all the details", "complete explanation",
+                "everything about", "all about", "comprehensive guide", "detailed guide"
+            ]
+            
+            user_wants_detail = any(indicator in user_message.lower() for indicator in elaboration_indicators)
+            
+            if is_detailed or user_wants_detail:
+                expected_output_tokens = min(expected_output_tokens * DETAILED_RESPONSE_MULTIPLIER, 4096)
+                logger.info(f"User requested detailed response, increasing max_tokens to {expected_output_tokens}")
+            else:
+                # For brief responses, limit tokens to encourage conciseness
+                expected_output_tokens = min(expected_output_tokens, BRIEF_RESPONSE_LIMIT)
+                logger.info(f"Brief response requested, limiting max_tokens to {expected_output_tokens}")
             
             # Validate context window
             validation = self.context_manager.validate_request(formatted_messages, expected_output_tokens)
@@ -206,14 +239,18 @@ class LLMService:
             # Generate response
             logger.debug(f"Generating response with {len(formatted_messages)} messages, max_tokens: {response_tokens}")
             
-            # Debug: Log the first message to see if system prompt is present
+            # Debug: Log token usage breakdown
             if formatted_messages:
                 first_msg = formatted_messages[0]
                 logger.info(f"LLM Service: First message role: {first_msg.get('role', 'unknown')}")
                 if system_prompt:
-                    logger.info(f"LLM Service: System prompt present, length: {len(system_prompt)}")
+                    logger.info(f"LLM Service: System prompt present, length: {len(system_prompt)} characters (~{len(system_prompt.split())} tokens)")
                 else:
                     logger.warning(f"LLM Service: No system prompt found!")
+                
+                # Log message count and approximate token usage
+                total_chars = sum(len(msg.get('content', '')) for msg in formatted_messages)
+                logger.info(f"LLM Service: {len(formatted_messages)} messages, ~{total_chars} characters total (~{total_chars//4} tokens)")
             
             # Prepare API parameters
             api_params = {
@@ -493,8 +530,8 @@ class LLMService:
             continue_params["messages"] = messages
             
             # Ensure continuation calls have enough tokens for comprehensive responses
-            if continue_params.get("max_tokens", 0) < 2000:
-                continue_params["max_tokens"] = 2000  # Ensure enough tokens for detailed responses
+            if continue_params.get("max_tokens", 0) < CONTINUATION_TOKEN_MINIMUM:
+                continue_params["max_tokens"] = CONTINUATION_TOKEN_MINIMUM
             
             # Make another API call to get Claude's final response
             logger.info(f"Making continuation API call with {len(messages)} messages")
@@ -516,66 +553,73 @@ class LLMService:
                     if hasattr(content_block, 'type') and content_block.type in ['tool_use', 'server_tool_use']:
                         additional_tool_calls.append(content_block)
                 
-                # First, add the assistant's tool use to the conversation (only for client tools)
-                assistant_tool_use_content = []
-                for tool_call in additional_tool_calls:
-                    if tool_call.name == 'memory':  # Only add client tools
-                        assistant_tool_use_content.append({
-                            "type": "tool_use",
-                            "id": tool_call.id,
-                            "name": tool_call.name,
-                            "input": tool_call.input
+                # Limit to prevent infinite loops - only process one round of additional tools
+                if len(additional_tool_calls) > 0 and len(additional_tool_calls) <= 2:  # Reasonable limit
+                    # First, add the assistant's tool use to the conversation (only for client tools)
+                    assistant_tool_use_content = []
+                    for tool_call in additional_tool_calls:
+                        if tool_call.name == 'memory':  # Only add client tools
+                            assistant_tool_use_content.append({
+                                "type": "tool_use",
+                                "id": tool_call.id,
+                                "name": tool_call.name,
+                                "input": tool_call.input
+                            })
+                    
+                    if assistant_tool_use_content:
+                        messages.append({
+                            "role": "assistant",
+                            "content": assistant_tool_use_content
                         })
-                
-                if assistant_tool_use_content:
-                    messages.append({
-                        "role": "assistant",
-                        "content": assistant_tool_use_content
-                    })
-                
-                # Then execute tools and add results
-                additional_tool_results = []
-                for tool_call in additional_tool_calls:
-                    if tool_call.name == 'memory':
-                        # Execute the tool
-                        tool_result = await self._handle_memory_tool_call(tool_call.input, session_id)
-                        
-                        # Create a more informative tool result
-                        if tool_result.get("success"):
-                            content = tool_result.get("content", "")
-                            additional_tool_results.append({
-                                "type": "tool_result",
-                                "tool_use_id": tool_call.id,
-                                "content": f"Memory operation completed: {content}"
-                            })
-                        else:
-                            error_msg = tool_result.get('error', 'Unknown error')
-                            additional_tool_results.append({
-                                "type": "tool_result",
-                                "tool_use_id": tool_call.id,
-                                "content": f"Memory operation failed: {error_msg}. Please continue with your response despite this memory operation issue."
-                            })
-                
-                # Add tool results to messages
-                if additional_tool_results:
-                    messages.append({
-                        "role": "user",
-                        "content": additional_tool_results
-                    })
-                
-                # Make final API call without tools to force text response
-                final_params = continue_params.copy()
-                # Keep tools in final call to avoid "Tool not found" errors
-                
-                logger.info(f"Making final API call with {len(messages)} messages (keeping tools available)")
-                self._rate_limit()
-                
-                final_response = self.client.messages.create(**final_params, extra_headers=self._get_beta_headers())
-                
-                # Log final API call usage
-                final_api_usage = self._extract_usage_info(final_response)
-                logger.info(f"Final API call completed - {final_api_usage['total_tokens']} total tokens used")
-                logger.info(f"Final response received: {type(final_response)} with {len(final_response.content) if final_response.content else 0} content blocks")
+                    
+                    # Then execute tools and add results
+                    additional_tool_results = []
+                    for tool_call in additional_tool_calls:
+                        if tool_call.name == 'memory':
+                            # Execute the tool
+                            tool_result = await self._handle_memory_tool_call(tool_call.input, session_id)
+                            
+                            # Create a more informative tool result
+                            if tool_result.get("success"):
+                                content = tool_result.get("content", "")
+                                additional_tool_results.append({
+                                    "type": "tool_result",
+                                    "tool_use_id": tool_call.id,
+                                    "content": f"Memory operation completed: {content}"
+                                })
+                            else:
+                                error_msg = tool_result.get('error', 'Unknown error')
+                                additional_tool_results.append({
+                                    "type": "tool_result",
+                                    "tool_use_id": tool_call.id,
+                                    "content": f"Memory operation failed: {error_msg}. Please continue with your response despite this memory operation issue."
+                                })
+                    
+                    # Add tool results to messages
+                    if additional_tool_results:
+                        messages.append({
+                            "role": "user",
+                            "content": additional_tool_results
+                        })
+                    
+                    # Make final API call without tools to force text response
+                    final_params = continue_params.copy()
+                    final_params["messages"] = messages
+                    final_params.pop("tools", None)  # Remove tools to force text response
+                    final_params.pop("tool_choice", None)  # Remove tool choice
+                    final_params["max_tokens"] = CONTINUATION_TOKEN_MINIMUM
+                    
+                    logger.info(f"Making final API call without tools to get text response")
+                    self._rate_limit()
+                    
+                    final_response = self.client.messages.create(**final_params, extra_headers=self._get_beta_headers())
+                    
+                    # Log final API call usage
+                    final_api_usage = self._extract_usage_info(final_response)
+                    logger.info(f"Final API call completed - {final_api_usage['total_tokens']} total tokens used")
+                    logger.info(f"Final response received: {type(final_response)} with {len(final_response.content) if final_response.content else 0} content blocks")
+                else:
+                    logger.warning(f"Too many additional tool calls ({len(additional_tool_calls)}), skipping to prevent infinite loops")
             
             # Extract final response text - collect all text blocks for complete response
             if final_response.content and len(final_response.content) > 0:
@@ -612,7 +656,7 @@ class LLMService:
                     final_params.pop("tool_choice", None)  # Remove tool choice
                     
                     # Ensure we have enough tokens for a comprehensive response
-                    final_params["max_tokens"] = 3000
+                    final_params["max_tokens"] = FINAL_CALL_TOKEN_LIMIT
                     
                     logger.info(f"Making final API call without tools to get text response")
                     self._rate_limit()
@@ -641,7 +685,7 @@ class LLMService:
                         logger.warning("No content in final response")
             else:
                 logger.warning("No content in final response")
-                response_text = "I apologize, but I encountered an issue generating a response. This appears to be a technical issue with the response generation system. Please try asking your question again, and I'll do my best to provide a comprehensive answer."
+                response_text = "I apologize, but I encountered a technical issue generating a response. Please try asking your question again, and I'll do my best to provide a helpful answer."
             
             # Extract comprehensive usage information from Claude API response
             final_usage = self._extract_usage_info(final_response)
@@ -752,7 +796,7 @@ class LLMService:
         temperature: Optional[float] = None,
         is_detailed: bool = False,
         session_id: Optional[str] = None
-    ):
+    ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         Generate a streaming response from Claude API.
         
@@ -784,7 +828,7 @@ class LLMService:
             # Calculate token usage and validate request
             expected_output_tokens = max_tokens or settings.max_tokens
             if is_detailed:
-                expected_output_tokens = min(expected_output_tokens * 2, 4096)
+                expected_output_tokens = min(expected_output_tokens * DETAILED_RESPONSE_MULTIPLIER, 4096)
             
             # Validate context window
             validation = self.context_manager.validate_request(formatted_messages, expected_output_tokens)

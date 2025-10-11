@@ -86,11 +86,23 @@ app = FastAPI(
 )
 
 # Add CORS middleware
+allowed_origins = [
+    "http://localhost:3000",
+    "http://localhost:3001",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:3001",
+]
+
+# Add production origins from environment variable
+if settings.environment == "production":
+    production_origins = os.getenv("ALLOWED_ORIGINS", "").split(",")
+    allowed_origins.extend([origin.strip() for origin in production_origins if origin.strip()])
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Configure appropriately for production
+    allow_origins=allowed_origins,
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
 
